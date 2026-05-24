@@ -203,7 +203,7 @@ export type LayerVisibility = {
   zones: boolean;
 };
 
-export type ViewMode = "2d" | "3d" | "compare";
+export type ViewMode = "2d" | "3d" | "compare" | "elevation";
 
 export type ClearanceMode = "off" | "all" | "selected";
 

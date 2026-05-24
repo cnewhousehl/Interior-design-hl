@@ -32,6 +32,7 @@ import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, renameLayout } from "@/lib/persistence";
 import type { SavedLayout, ToolMode } from "@/lib/types";
 import IdentifyFromPhoto from "./IdentifyFromPhoto";
+import { exportPdf } from "@/lib/pdfExport";
 
 export default function Toolbar() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -228,13 +229,14 @@ export default function Toolbar() {
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
         <div className="seg">
-          {(["2d", "3d", "compare"] as const).map((v) => (
+          {(["2d", "3d", "elevation", "compare"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
               className={`seg-btn flex items-center gap-1 ${view === v ? "seg-btn-active" : ""}`}
+              title={v}
             >
-              {v === "compare" ? "AB" : v.toUpperCase()}
+              {v === "compare" ? "AB" : v === "elevation" ? "Elev" : v.toUpperCase()}
             </button>
           ))}
         </div>
@@ -599,8 +601,9 @@ function AutoDetectButton() {
 
 function ExportPngButton() {
   const floorPlan = useDesignStore((s) => s.floorPlan);
+  const [open, setOpen] = useState(false);
 
-  const handle = () => {
+  const exportPng = () => {
     const stage = (window as unknown as { __designStage?: { toDataURL: (opts: { pixelRatio: number }) => string } })
       .__designStage;
     if (!stage) {
@@ -612,11 +615,34 @@ function ExportPngButton() {
     link.download = `layout-${new Date().toISOString().slice(0, 10)}.png`;
     link.href = dataUrl;
     link.click();
+    setOpen(false);
+  };
+
+  const exportPdfFile = () => {
+    const name = prompt("Project name for the PDF:", "Apartment plan");
+    exportPdf({ projectName: name ?? undefined });
+    setOpen(false);
   };
 
   return (
-    <button onClick={handle} disabled={!floorPlan} className="btn-outline btn-md btn-icon" title="Export PNG">
-      <Download className="w-3.5 h-3.5" />
-    </button>
+    <div className="relative shrink-0">
+      <button onClick={() => setOpen((o) => !o)} disabled={!floorPlan} className="btn-outline btn-md" title="Export">
+        <Download className="w-3.5 h-3.5" />
+        <ChevronDown className="w-3 h-3" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-2 card shadow-float z-20 w-44 p-1 animate-slide-up">
+            <button onClick={exportPng} className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-ink-100">
+              PNG (canvas snapshot)
+            </button>
+            <button onClick={exportPdfFile} className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-ink-100">
+              PDF (3-page report)
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

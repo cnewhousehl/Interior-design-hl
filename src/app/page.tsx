@@ -23,6 +23,11 @@ const CompareView = dynamic(() => import("@/components/CompareView"), {
   loading: () => <div className="h-full w-full grid place-items-center text-ink-400 text-sm">Loading comparison…</div>,
 });
 
+const ElevationView = dynamic(() => import("@/components/ElevationView"), {
+  ssr: false,
+  loading: () => <div className="h-full w-full grid place-items-center text-ink-400 text-sm">Loading elevation…</div>,
+});
+
 export default function Page() {
   const removeFurniture = useDesignStore((s) => s.removeFurniture);
   const selectedId = useDesignStore((s) => s.selectedId);
@@ -102,6 +107,7 @@ export default function Page() {
         <main className="flex-1 relative overflow-hidden">
           {view === "2d" && <FloorPlanCanvas />}
           {view === "3d" && <Scene3D />}
+          {view === "elevation" && <ElevationView />}
           {view === "compare" && <CompareView />}
         </main>
         <PropertiesPanel />
