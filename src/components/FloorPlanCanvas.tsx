@@ -71,6 +71,14 @@ export default function FloorPlanCanvas() {
     return () => ro.disconnect();
   }, []);
 
+  // Expose stage on window so the toolbar's PNG export can reach it
+  useEffect(() => {
+    (window as unknown as { __designStage?: Konva.Stage | null }).__designStage = stageRef.current;
+    return () => {
+      (window as unknown as { __designStage?: Konva.Stage | null }).__designStage = null;
+    };
+  });
+
   const ppf = floorPlan?.pixelsPerFoot ?? null;
 
   // ---------- coord conversion ----------

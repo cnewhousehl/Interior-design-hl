@@ -5,35 +5,61 @@ import { useEffect } from "react";
 import Toolbar from "@/components/Toolbar";
 import FurniturePalette from "@/components/FurniturePalette";
 import PropertiesPanel from "@/components/PropertiesPanel";
-import { useDesignStore } from "@/lib/store";
+import { useDesignStore, useTemporalStore } from "@/lib/store";
 
 const FloorPlanCanvas = dynamic(() => import("@/components/FloorPlanCanvas"), {
   ssr: false,
-  loading: () => (
-    <div className="h-full w-full grid place-items-center text-ink/40 text-sm">Loading canvas…</div>
-  ),
+  loading: () => <div className="h-full w-full grid place-items-center text-ink/40 text-sm">Loading canvas…</div>,
 });
 
 export default function Page() {
   const removeFurniture = useDesignStore((s) => s.removeFurniture);
   const selectedId = useDesignStore((s) => s.selectedId);
+  const selectedIds = useDesignStore((s) => s.selectedIds);
   const setToolMode = useDesignStore((s) => s.setToolMode);
+  const clearSelection = useDesignStore((s) => s.clearSelection);
 
-  // Keyboard: Delete to remove selected, Esc to exit place/calibrate
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target && /input|textarea|select/i.test(target.tagName)) return;
-      if ((e.key === "Backspace" || e.key === "Delete") && selectedId) {
+      const meta = e.metaKey || e.ctrlKey;
+
+      // Undo / Redo
+      if (meta && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        removeFurniture(selectedId);
+        if (e.shiftKey) useTemporalStore.getState().redo();
+        else useTemporalStore.getState().undo();
+        return;
+      }
+      if (meta && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        useTemporalStore.getState().redo();
+        return;
+      }
+
+      // Tool shortcuts
+      if (!meta && !e.shiftKey) {
+        if (e.key === "v") return setToolMode("select");
+        if (e.key === "w") return setToolMode("draw-wall");
+        if (e.key === "d") return setToolMode("draw-door");
+        if (e.key === "m") return setToolMode("measure");
+        if (e.key === "n") return setToolMode("note");
+      }
+
+      if ((e.key === "Backspace" || e.key === "Delete") && (selectedId || selectedIds.length)) {
+        e.preventDefault();
+        const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+        ids.forEach((id) => removeFurniture(id));
+        clearSelection();
       } else if (e.key === "Escape") {
         setToolMode("select", null);
+        clearSelection();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedId, removeFurniture, setToolMode]);
+  }, [selectedId, selectedIds, removeFurniture, setToolMode, clearSelection]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
