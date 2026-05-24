@@ -149,19 +149,7 @@ function PropertiesTab() {
   const cat = selected ? getCatalogItem(selected.catalogId) : null;
 
   if (!selected || !cat) {
-    return (
-      <div className="flex-1 grid place-items-center p-6 text-center">
-        <div className="max-w-[240px]">
-          <div className="w-12 h-12 rounded-full bg-paper-200 mx-auto mb-3 grid place-items-center">
-            <ListTree className="w-5 h-5 text-ink-400" />
-          </div>
-          <div className="font-medium text-sm text-ink-700 mb-1">Nothing selected</div>
-          <div className="text-xs text-ink-500 leading-snug">
-            Click a piece on the canvas to edit it. Shift-click adds to selection.
-          </div>
-        </div>
-      </div>
-    );
+    return <NoSelectionPanel />;
   }
 
   const statusOpts: { v: FurnitureStatus | ""; label: string; color: string }[] = [
@@ -365,6 +353,93 @@ function PropertiesTab() {
         cat.description && (
           <div className="text-[11px] text-ink-500 pt-2 border-t border-ink-200/70">{cat.description}</div>
         )
+      )}
+    </div>
+  );
+}
+
+function NoSelectionPanel() {
+  const pendingFixtureKind = useDesignStore((s) => s.pendingFixtureKind);
+  const setPendingFixtureKind = useDesignStore((s) => s.setPendingFixtureKind);
+  const toolMode = useDesignStore((s) => s.toolMode);
+  const fixtures = useDesignStore((s) => s.fixtures);
+  const removeFixture = useDesignStore((s) => s.removeFixture);
+
+  const fixtureKinds: { v: typeof pendingFixtureKind; label: string; color: string }[] = [
+    { v: "outlet", label: "Outlet", color: "#1c1917" },
+    { v: "switch", label: "Switch", color: "#0369a1" },
+    { v: "vent", label: "Vent", color: "#7c3aed" },
+    { v: "ceiling-light", label: "Ceiling", color: "#eab308" },
+    { v: "wall-light", label: "Wall", color: "#eab308" },
+    { v: "radiator", label: "Radiator", color: "#dc2626" },
+    { v: "plumbing", label: "Plumbing", color: "#0ea5e9" },
+  ];
+
+  return (
+    <div className="flex-1 overflow-auto p-4 space-y-4 text-sm">
+      {toolMode === "fixture" ? (
+        <div className="card p-3 space-y-2 animate-slide-up">
+          <div className="label">Place fixture · click canvas to drop</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {fixtureKinds.map((k) => {
+              const active = pendingFixtureKind === k.v;
+              return (
+                <button
+                  key={k.v ?? "x"}
+                  onClick={() => setPendingFixtureKind(k.v)}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-xs ${
+                    active ? "border-ink-900 bg-ink-900 text-paper-50" : "border-ink-200 hover:bg-ink-100"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ background: k.color }} />
+                  <span>{k.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-[11px] text-ink-500 leading-snug pt-1">
+            Tip: shift-click an existing fixture on the canvas to remove it.
+          </div>
+        </div>
+      ) : (
+        <div className="grid place-items-center text-center py-4">
+          <div className="max-w-[240px]">
+            <div className="w-12 h-12 rounded-full bg-paper-200 mx-auto mb-3 grid place-items-center">
+              <ListTree className="w-5 h-5 text-ink-400" />
+            </div>
+            <div className="font-medium text-sm text-ink-700 mb-1">Nothing selected</div>
+            <div className="text-xs text-ink-500 leading-snug">
+              Click a piece on the canvas to edit it. Shift-click to add to selection.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fixtures.length > 0 && (
+        <div className="card p-3 animate-slide-up">
+          <div className="label mb-2">Fixtures · {fixtures.length}</div>
+          <ul className="space-y-1">
+            {fixtures.map((f) => {
+              const k = fixtureKinds.find((x) => x.v === f.kind);
+              return (
+                <li key={f.id} className="flex items-center gap-2 text-xs py-1">
+                  <span className="w-2 h-2 rounded-full" style={{ background: k?.color ?? "#1c1917" }} />
+                  <span className="flex-1 capitalize">{f.kind.replace("-", " ")}</span>
+                  <span className="font-mono text-ink-400">
+                    {f.position.x.toFixed(1)}, {f.position.y.toFixed(1)}
+                  </span>
+                  <button
+                    onClick={() => removeFixture(f.id)}
+                    className="text-ink-400 hover:text-red-700"
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );

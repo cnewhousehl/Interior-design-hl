@@ -430,6 +430,15 @@ export default function FloorPlanCanvas() {
             ))}
         </Layer>
 
+        {/* Light cones (rendered below fixtures for proper z-order) */}
+        {ppf && layers.fixtures && fixtures.some((f) => f.kind === "ceiling-light" || f.kind === "wall-light") && (
+          <Layer listening={false}>
+            {fixtures.map((f) => (
+              <LightCone key={`l-${f.id}`} fixture={f} ppf={ppf} zoom={zoom} />
+            ))}
+          </Layer>
+        )}
+
         {/* Fixtures */}
         {ppf && layers.fixtures && fixtures.length > 0 && (
           <Layer>
@@ -1087,6 +1096,23 @@ function GridLayer({ width, height, ppf }: { width: number; height: number; ppf:
         />
       ))}
     </>
+  );
+}
+
+function LightCone({ fixture, ppf, zoom }: { fixture: FixtureMarker; ppf: number; zoom: number }) {
+  if (fixture.kind !== "ceiling-light" && fixture.kind !== "wall-light") return null;
+  const r = (fixture.kind === "ceiling-light" ? 7 : 4) * ppf;
+  return (
+    <Circle
+      x={fixture.position.x * ppf}
+      y={fixture.position.y * ppf}
+      radius={r}
+      fill="rgba(250, 204, 21, 0.10)"
+      stroke="rgba(217, 119, 6, 0.45)"
+      strokeWidth={0.75 / zoom}
+      dash={[6 / zoom, 6 / zoom]}
+      listening={false}
+    />
   );
 }
 
