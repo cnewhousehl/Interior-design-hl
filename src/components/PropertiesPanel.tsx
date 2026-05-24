@@ -26,6 +26,8 @@ import { runValidation, polygonAreaSqft, findRoomAt } from "@/lib/validation";
 import { MOODBOARDS } from "@/lib/moodboard";
 import { downloadShoppingCsv, buildShoppingList } from "@/lib/shoppingList";
 import { encodeShareUrl } from "@/lib/share";
+import { getApiKey, settings } from "@/lib/settings";
+import { computeWalkability } from "@/lib/walkability";
 
 type Tab = "props" | "issues" | "mood" | "shop";
 
@@ -424,6 +426,127 @@ function PropertiesTab() {
   );
 }
 
+function BudgetCard({ knownTotal, total }: { knownTotal: number; total: number }) {
+  const budget = settings.get().budgetUsd;
+  const over = budget && total > budget;
+  return (
+    <div className={`card p-3 grid grid-cols-2 gap-2 text-xs ${over ? "ring-1 ring-red-300 bg-red-50" : ""}`}>
+      <div>
+        <div className="label">Booked</div>
+        <div className="font-mono text-lg text-ink-900">${knownTotal.toLocaleString()}</div>
+      </div>
+      <div>
+        <div className="label">Est. total</div>
+        <div className={`font-mono text-lg ${over ? "text-red-700" : "text-ink-900"}`}>~${Math.round(total).toLocaleString()}</div>
+      </div>
+      {budget && (
+        <div className="col-span-2 pt-1 border-t border-ink-200/70">
+          <div className="flex items-center justify-between">
+            <span className="label">Budget</span>
+            <span className="font-mono text-xs">${budget.toLocaleString()}</span>
+          </div>
+          <div className="h-1.5 mt-1 rounded-full bg-ink-100 overflow-hidden">
+            <div
+              className={`h-full ${over ? "bg-red-500" : "bg-sage-500"}`}
+              style={{ width: `${Math.min(100, (total / budget) * 100).toFixed(0)}%` }}
+            />
+          </div>
+          <div className="text-[10px] text-ink-500 mt-1">
+            {over
+              ? `Over budget by ~$${Math.round(total - budget).toLocaleString()}`
+              : `${Math.round((1 - total / budget) * 100)}% headroom`}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryBreakdown({ rows, total }: { rows: ShopRow[]; total: number }) {
+  const cats = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      const v = r.price || (r.priceLow + r.priceHigh) / 2;
+      m.set(r.category, (m.get(r.category) ?? 0) + v);
+    }
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  }, [rows]);
+  const palette = ["#b45309", "#5d7a5a", "#0369a1", "#7c3aed", "#dc2626", "#1c1917", "#a8a29e"];
+  return (
+    <div className="card p-3">
+      <div className="label mb-2">Cost by category</div>
+      <div className="space-y-1">
+        {cats.map(([name, v], i) => {
+          const pct = total > 0 ? (v / total) * 100 : 0;
+          return (
+            <div key={name} className="text-xs">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 capitalize">
+                  <span className="w-2 h-2 rounded-full" style={{ background: palette[i % palette.length] }} />
+                  {name}
+                </span>
+                <span className="font-mono text-ink-500">~${Math.round(v).toLocaleString()}</span>
+              </div>
+              <div className="h-1 mt-0.5 rounded-full bg-ink-100 overflow-hidden">
+                <div className="h-full" style={{ width: `${pct}%`, background: palette[i % palette.length] }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type ShopRow = {
+  label: string;
+  catalogName: string;
+  category: string;
+  width: number;
+  depth: number;
+  status: string;
+  price: number;
+  priceLow: number;
+  priceHigh: number;
+  retailer: string;
+  url: string;
+  notes: string;
+};
+
+function WalkabilityCard() {
+  const placed = useDesignStore((s) => s.placed);
+  const rooms = useDesignStore((s) => s.rooms);
+  const scores = useMemo(() => computeWalkability({ placed, rooms }), [placed, rooms]);
+  if (!rooms.length) return null;
+  return (
+    <div className="card p-3">
+      <div className="label mb-2">Walkability per room</div>
+      <ul className="space-y-1.5">
+        {scores.map((s) => {
+          const color =
+            s.score >= 70 ? "bg-sage-500"
+            : s.score >= 40 ? "bg-amber-500"
+            : "bg-red-500";
+          return (
+            <li key={s.roomId} className="text-xs">
+              <div className="flex items-center justify-between">
+                <span className="truncate">{s.roomName}</span>
+                <span className={`font-mono text-ink-700`}>{s.score}/100</span>
+              </div>
+              <div className="h-1 mt-0.5 rounded-full bg-ink-100 overflow-hidden">
+                <div className={`h-full ${color}`} style={{ width: `${s.score}%` }} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="text-[10px] text-ink-500 mt-2 leading-relaxed">
+        % of room area more than 1.5' from any furniture. Lower = harder to walk through.
+      </div>
+    </div>
+  );
+}
+
 function NoSelectionPanel() {
   const pendingFixtureKind = useDesignStore((s) => s.pendingFixtureKind);
   const setPendingFixtureKind = useDesignStore((s) => s.setPendingFixtureKind);
@@ -643,6 +766,7 @@ function MoodTab({ theme }: { theme: Theme | null }) {
           placed: placed.map((p) => ({ catalogId: p.catalogId, label: p.label })),
           roomNotes:
             "Small NYC apartment: living/dining ~11'×23'6\", bedroom 11'×11'7\", terrace 165.5 sqft, L-shaped kitchen along the wall.",
+          apiKey: getApiKey(),
         }),
       });
       const data = await res.json();
@@ -817,17 +941,12 @@ function ShopTab() {
       </div>
 
       {rows.length > 0 && (
-        <div className="card p-3 grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <div className="label">Booked</div>
-            <div className="font-mono text-lg text-ink-900">${knownTotal.toLocaleString()}</div>
-          </div>
-          <div>
-            <div className="label">Est. total</div>
-            <div className="font-mono text-lg text-ink-900">~${total.toLocaleString()}</div>
-          </div>
-        </div>
+        <BudgetCard knownTotal={knownTotal} total={total} />
       )}
+
+      {rows.length > 0 && <CategoryBreakdown rows={rows} total={total} />}
+
+      <WalkabilityCard />
 
       <div className="seg">
         {(["status", "room"] as const).map((g) => (

@@ -15,17 +15,19 @@ type Recommendation = {
 };
 
 export async function POST(req: NextRequest) {
-  const { theme, placed, roomNotes } = (await req.json()) as {
+  const body = (await req.json()) as {
     theme: Theme;
     placed: { catalogId: string; label: string }[];
     roomNotes?: string;
+    apiKey?: string;
   };
+  const { theme, placed, roomNotes } = body;
 
   if (!theme) {
     return NextResponse.json({ error: "theme is required" }, { status: 400 });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = body.apiKey || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     // Fall back to local catalog matches so the app remains useful without a key.
     const fallback = CATALOG.filter((c) => c.themes.includes(theme))

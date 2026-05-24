@@ -5,6 +5,7 @@ import { Camera, X, Sparkles, Plus, CircleCheck } from "lucide-react";
 import { useDesignStore } from "@/lib/store";
 import { getCatalogItem } from "@/lib/catalog";
 import { formatFeet } from "@/lib/format";
+import { getApiKey } from "@/lib/settings";
 
 type IdentifiedItem = {
   catalogId: string | null;
@@ -43,7 +44,7 @@ export default function IdentifyFromPhoto() {
       const res = await fetch("/api/identify-furniture", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mediaType }),
+        body: JSON.stringify({ imageBase64: base64, mediaType, apiKey: getApiKey() }),
       });
       const data = await res.json();
       if (data.error) {

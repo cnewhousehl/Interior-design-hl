@@ -16,16 +16,18 @@ export const maxDuration = 60;
  * placement tools.
  */
 export async function POST(req: NextRequest) {
-  const { imageBase64, mediaType } = (await req.json()) as {
+  const body = (await req.json()) as {
     imageBase64: string;
     mediaType: string;
+    apiKey?: string;
   };
+  const { imageBase64, mediaType } = body;
 
   if (!imageBase64) {
     return NextResponse.json({ error: "imageBase64 is required" }, { status: 400 });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = body.apiKey || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
       { error: "ANTHROPIC_API_KEY not set — photo identification requires an API key." },

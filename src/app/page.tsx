@@ -6,6 +6,9 @@ import Toolbar from "@/components/Toolbar";
 import FurniturePalette from "@/components/FurniturePalette";
 import PropertiesPanel from "@/components/PropertiesPanel";
 import OnboardingBanner from "@/components/OnboardingBanner";
+import CommandPalette from "@/components/CommandPalette";
+import KeyboardOverlay from "@/components/KeyboardOverlay";
+import MiniMap from "@/components/MiniMap";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { tryLoadFromHash } from "@/lib/share";
 
@@ -145,9 +148,12 @@ export default function Page() {
           {view === "elevation" && <ElevationView />}
           {view === "compare" && <CompareView />}
           {view === "2d" && <OnboardingBanner />}
+          {view === "2d" && <MiniMap />}
         </main>
         <PropertiesPanel />
       </div>
+      <CommandPalette />
+      <KeyboardOverlay />
     </div>
   );
 }

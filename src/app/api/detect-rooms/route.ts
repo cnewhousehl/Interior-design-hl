@@ -11,19 +11,21 @@ export const maxDuration = 60;
  * tracing complex wall polygons — vision models are still shaky on precise geometry.
  */
 export async function POST(req: NextRequest) {
-  const { imageBase64, mediaType, pixelsPerFoot, imageWidth, imageHeight } = (await req.json()) as {
+  const body = (await req.json()) as {
     imageBase64: string;
     mediaType: string;
     pixelsPerFoot: number;
     imageWidth: number;
     imageHeight: number;
+    apiKey?: string;
   };
+  const { imageBase64, mediaType, pixelsPerFoot, imageWidth, imageHeight } = body;
 
   if (!imageBase64 || !pixelsPerFoot) {
     return NextResponse.json({ error: "imageBase64 and pixelsPerFoot are required" }, { status: 400 });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = body.apiKey || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
       { error: "ANTHROPIC_API_KEY not set — vision auto-detect requires an API key." },

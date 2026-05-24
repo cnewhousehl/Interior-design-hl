@@ -33,6 +33,9 @@ import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, 
 import type { SavedLayout, ToolMode, FixtureKind } from "@/lib/types";
 import IdentifyFromPhoto from "./IdentifyFromPhoto";
 import { exportPdf } from "@/lib/pdfExport";
+import { getApiKey } from "@/lib/settings";
+import SettingsModal from "./SettingsModal";
+import { Settings as SettingsIcon, HelpCircle, Search as SearchIcon } from "lucide-react";
 
 export default function Toolbar() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -109,8 +112,12 @@ export default function Toolbar() {
 
       <LayoutsMenu />
 
+      <CommandSearchButton />
+
       <AutoDetectButton />
       <IdentifyFromPhoto />
+
+      <ApiStatusBadge />
 
       <div className="divider-v" />
 
@@ -267,6 +274,7 @@ export default function Toolbar() {
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>
+        <HelpButton />
       </div>
     </header>
   );
@@ -447,6 +455,61 @@ function LayersMenu() {
 // Layouts dropdown
 // ---------------------------------------------------------------------------
 
+function CommandSearchButton() {
+  return (
+    <button
+      onClick={() => {
+        const evt = new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true });
+        window.dispatchEvent(evt);
+      }}
+      title="Search · Cmd/Ctrl + K"
+      className="btn-outline btn-md shrink-0"
+    >
+      <SearchIcon className="w-3.5 h-3.5" />
+      <span className="hidden lg:inline">Search</span>
+      <kbd className="hidden xl:inline text-[9px] font-mono px-1 py-0.5 rounded border border-ink-200 ml-1">⌘K</kbd>
+    </button>
+  );
+}
+
+function ApiStatusBadge() {
+  const [open, setOpen] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setHasKey(!!getApiKey());
+    }
+  }, [open]);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title={hasKey ? "AI features enabled" : "AI features need an API key"}
+        className={`btn-md shrink-0 ${hasKey ? "btn-outline" : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 rounded-lg border h-8 px-2.5 text-sm gap-1.5 inline-flex items-center font-medium"}`}
+      >
+        <SettingsIcon className="w-3.5 h-3.5" />
+        <span className="hidden lg:inline">{hasKey ? "AI on" : "No key"}</span>
+      </button>
+      <SettingsModal open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+function HelpButton() {
+  return (
+    <button
+      onClick={() => {
+        const evt = new KeyboardEvent("keydown", { key: "?", bubbles: true });
+        window.dispatchEvent(evt);
+      }}
+      title="Keyboard shortcuts (?)"
+      className="btn-outline btn-md btn-icon shrink-0"
+    >
+      <HelpCircle className="w-3.5 h-3.5" />
+    </button>
+  );
+}
+
 function LayoutsMenu() {
   const [open, setOpen] = useState(false);
   const [layouts, setLayouts] = useState<SavedLayout[]>([]);
@@ -595,6 +658,7 @@ function AutoDetectButton() {
           pixelsPerFoot: ppf,
           imageWidth: floorPlan.imagePxWidth,
           imageHeight: floorPlan.imagePxHeight,
+          apiKey: getApiKey(),
         }),
       });
       const data = (await res.json()) as {
