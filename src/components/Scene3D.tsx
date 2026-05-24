@@ -1,10 +1,10 @@
 "use client";
 
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Environment, ContactShadows, Sky, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Camera as CameraIcon, Eye, Sun, Maximize2 } from "lucide-react";
+import { Camera as CameraIcon, Eye, Sun, Maximize2, Play, Pause } from "lucide-react";
 import { useDesignStore } from "@/lib/store";
 import { defaultHeight, getCatalogItem } from "@/lib/catalog";
 import type { CatalogItem, PlacedFurniture, Wall } from "@/lib/types";
@@ -33,9 +33,23 @@ export default function Scene3D() {
   const floorPlan = useDesignStore((s) => s.floorPlan);
 
   const [view, setView] = useState<ViewKind>("orbit");
-  const [sunny, setSunny] = useState(true);
+  const [timeOfDay, setTimeOfDay] = useState(0.5); // 0 = sunrise, 0.5 = noon, 1 = sunset, >1 = night
+  const [preset, setPreset] = useState<"day" | "golden" | "sunset" | "night" | "overcast">("day");
   const [zoom, setZoom] = useState(1);
+  const [walkthroughOn, setWalkthroughOn] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const trafficPaths = useDesignStore((s) => s.trafficPaths);
+
+  // Map preset → time-of-day + atmosphere
+  useEffect(() => {
+    if (preset === "day") setTimeOfDay(0.5);
+    else if (preset === "golden") setTimeOfDay(0.15);
+    else if (preset === "sunset") setTimeOfDay(0.92);
+    else if (preset === "night") setTimeOfDay(1.3);
+    else if (preset === "overcast") setTimeOfDay(0.5);
+  }, [preset]);
+
+  const atmosphere = useMemo(() => atmosphereFor(timeOfDay, preset === "overcast"), [timeOfDay, preset]);
 
   const bounds = useMemo(() => {
     const xs: number[] = [];
@@ -87,8 +101,8 @@ export default function Scene3D() {
     <div ref={canvasRef} className="h-full w-full relative bg-ink-100">
       <Canvas shadows gl={{ antialias: true, preserveDrawingBuffer: true }} dpr={[1, 2]}>
         <Suspense fallback={null}>
-          <color attach="background" args={[sunny ? "#bcd9e8" : "#1e2738"]} />
-          <fog attach="fog" args={[sunny ? "#bcd9e8" : "#1e2738", bounds.span * 2, bounds.span * 6]} />
+          <color attach="background" args={[atmosphere.skyColor]} />
+          <fog attach="fog" args={[atmosphere.fogColor, bounds.span * 2, bounds.span * 6]} />
 
           {view === "orbit" ? (
             <PerspectiveCamera
@@ -106,12 +120,16 @@ export default function Scene3D() {
             />
           )}
 
-          {/* Lighting */}
-          <ambientLight intensity={sunny ? 0.5 : 0.35} />
+          {/* Lighting — driven by time-of-day */}
+          <ambientLight intensity={atmosphere.ambient} color={atmosphere.ambientColor} />
           <directionalLight
-            position={[bounds.cx + bounds.span * 0.6, bounds.span * 2, bounds.cy - bounds.span * 0.6]}
-            intensity={sunny ? 1.4 : 0.8}
-            color={sunny ? "#fff5e1" : "#a8b5d6"}
+            position={[
+              bounds.cx + atmosphere.sunDir.x * bounds.span,
+              atmosphere.sunDir.y * bounds.span,
+              bounds.cy + atmosphere.sunDir.z * bounds.span,
+            ]}
+            intensity={atmosphere.sunIntensity}
+            color={atmosphere.sunColor}
             castShadow
             shadow-mapSize-width={2048}
             shadow-mapSize-height={2048}
@@ -125,12 +143,30 @@ export default function Scene3D() {
           />
           <directionalLight
             position={[bounds.cx - bounds.span, bounds.span, bounds.cy + bounds.span]}
-            intensity={0.3}
-            color="#cfd9eb"
+            intensity={atmosphere.fillIntensity}
+            color={atmosphere.fillColor}
           />
 
-          {sunny && <Sky distance={450000} sunPosition={[bounds.cx + bounds.span, bounds.span * 1.5, bounds.cy - bounds.span]} inclination={0.6} azimuth={0.25} />}
-          <Environment preset={sunny ? "apartment" : "night"} />
+          {atmosphere.showSky && (
+            <Sky
+              distance={450000}
+              sunPosition={[
+                bounds.cx + atmosphere.sunDir.x * bounds.span * 1.5,
+                atmosphere.sunDir.y * bounds.span * 1.5,
+                bounds.cy + atmosphere.sunDir.z * bounds.span * 1.5,
+              ]}
+              inclination={atmosphere.skyInclination}
+              azimuth={0.25}
+              turbidity={atmosphere.turbidity}
+              rayleigh={atmosphere.rayleigh}
+            />
+          )}
+          <Environment preset={atmosphere.envPreset} />
+
+          {/* Walkthrough animated dot */}
+          {walkthroughOn && trafficPaths.length > 0 && (
+            <WalkthroughDot paths={trafficPaths} />
+          )}
 
           {/* Ground (grass) extending beyond building */}
           <mesh receiveShadow position={[bounds.cx, -0.01, bounds.cy]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -197,14 +233,33 @@ export default function Scene3D() {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setSunny((x) => !x)}
-          className={`btn-md shadow-float ${sunny ? "btn-primary" : "btn-outline"}`}
-          title="Toggle day / night"
-        >
-          <Sun className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">{sunny ? "Day" : "Night"}</span>
-        </button>
+        <div className="card p-2 shadow-float">
+          <div className="label mb-1 flex items-center gap-1"><Sun className="w-3 h-3" /> Time of day</div>
+          <input
+            type="range"
+            min={0}
+            max={1.5}
+            step={0.01}
+            value={timeOfDay}
+            onChange={(e) => setTimeOfDay(parseFloat(e.target.value))}
+            className="accent-accent-500 w-28 block"
+          />
+          <div className="text-[10px] font-mono text-ink-500 mt-0.5 text-center">{labelForTime(timeOfDay)}</div>
+          <div className="flex gap-1 mt-1.5">
+            {(["day", "golden", "sunset", "night", "overcast"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPreset(p)}
+                className={`flex-1 text-[9px] uppercase tracking-wider py-0.5 rounded border ${
+                  preset === p ? "bg-ink-900 text-paper-50 border-ink-900" : "border-ink-200 hover:bg-ink-100"
+                }`}
+                title={p}
+              >
+                {p[0]}
+              </button>
+            ))}
+          </div>
+        </div>
         {view === "top" && (
           <div className="card p-2 shadow-float">
             <div className="label mb-1">Zoom</div>
@@ -218,6 +273,16 @@ export default function Scene3D() {
               className="accent-accent-500 w-24"
             />
           </div>
+        )}
+        {trafficPaths.length > 0 && (
+          <button
+            onClick={() => setWalkthroughOn((x) => !x)}
+            className={`btn-md shadow-float ${walkthroughOn ? "btn-primary" : "btn-outline"}`}
+            title="Animate a dot walking the traffic paths"
+          >
+            {walkthroughOn ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            <span className="hidden md:inline">{walkthroughOn ? "Stop" : "Walk"}</span>
+          </button>
         )}
         <button
           onClick={snapshot}
@@ -743,6 +808,168 @@ function OttomanMesh({ w, d, h, color }: { w: number; d: number; h: number; colo
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Map time-of-day [0..1.5] (0 = sunrise, 0.5 = noon, 1 = sunset, 1.5 = deep night)
+ * to a coherent set of lighting parameters: sun position, color, intensity, sky.
+ */
+type Atmosphere = {
+  skyColor: string;
+  fogColor: string;
+  ambient: number;
+  ambientColor: string;
+  sunDir: { x: number; y: number; z: number };
+  sunIntensity: number;
+  sunColor: string;
+  fillIntensity: number;
+  fillColor: string;
+  showSky: boolean;
+  skyInclination: number;
+  turbidity: number;
+  rayleigh: number;
+  envPreset: "apartment" | "city" | "dawn" | "sunset" | "night" | "park";
+};
+
+function atmosphereFor(t: number, overcast = false): Atmosphere {
+  // Clamp
+  const u = Math.max(0, Math.min(1.5, t));
+  // Sun position arcs: at u=0 sun is low east (+X), u=0.5 high overhead, u=1 low west (-X)
+  const phase = u <= 1 ? u * Math.PI : Math.PI; // 0..π
+  const altitude = u <= 1 ? Math.sin(phase) : -0.4; // height above horizon (-1..1)
+  const sunX = u <= 1 ? Math.cos(phase) : -0.6;
+  const sunZ = -0.4;
+  const sunY = Math.max(0.05, altitude * 1.5);
+
+  const night = u >= 1.1;
+  const goldenHour = (u < 0.18 || (u > 0.82 && u < 1)) && !night;
+  const sunset = u > 0.85 && u <= 1;
+
+  let skyColor = "#bcd9e8";
+  let fogColor = "#bcd9e8";
+  let sunColor = "#fff5e1";
+  let sunIntensity = 1.4;
+  let ambient = 0.5;
+  let ambientColor = "#ffffff";
+  let fillIntensity = 0.3;
+  let fillColor = "#cfd9eb";
+  let envPreset: Atmosphere["envPreset"] = "apartment";
+  let skyInclination = 0.6;
+  let turbidity = 8;
+  let rayleigh = 1.5;
+
+  if (overcast) {
+    skyColor = "#c8ccd2";
+    fogColor = "#d6dade";
+    sunColor = "#dadfe5";
+    sunIntensity = 0.6;
+    ambient = 0.65;
+    fillIntensity = 0.4;
+    envPreset = "park";
+    turbidity = 14;
+    rayleigh = 3;
+  } else if (night) {
+    skyColor = "#0c1224";
+    fogColor = "#0c1224";
+    sunColor = "#a8b5d6";
+    sunIntensity = 0.25;
+    ambient = 0.28;
+    ambientColor = "#9bb1d6";
+    fillIntensity = 0.5;
+    fillColor = "#6b88c2";
+    envPreset = "night";
+    turbidity = 1;
+    rayleigh = 0.5;
+  } else if (sunset) {
+    skyColor = "#f5a86d";
+    fogColor = "#e29a6b";
+    sunColor = "#ff8b3c";
+    sunIntensity = 1.3;
+    ambient = 0.42;
+    fillColor = "#a98ec2";
+    envPreset = "sunset";
+    turbidity = 16;
+    rayleigh = 4;
+  } else if (goldenHour) {
+    skyColor = "#ffd8a8";
+    fogColor = "#f5c898";
+    sunColor = "#ffb56e";
+    sunIntensity = 1.5;
+    ambient = 0.5;
+    envPreset = "dawn";
+    turbidity = 12;
+    rayleigh = 3;
+  }
+
+  skyInclination = Math.max(0.05, 0.5 - altitude * 0.45);
+
+  return {
+    skyColor,
+    fogColor,
+    ambient,
+    ambientColor,
+    sunDir: { x: sunX, y: sunY, z: sunZ },
+    sunIntensity,
+    sunColor,
+    fillIntensity,
+    fillColor,
+    showSky: !night,
+    skyInclination,
+    turbidity,
+    rayleigh,
+    envPreset,
+  };
+}
+
+function labelForTime(t: number): string {
+  if (t >= 1.1) return "night";
+  if (t > 0.85) return "sunset";
+  if (t > 0.65) return "afternoon";
+  if (t >= 0.4 && t <= 0.6) return "noon";
+  if (t > 0.18) return "morning";
+  return "sunrise";
+}
+
+/** Walks a small dot at human speed (~3 ft/s) along the first traffic path, loops. */
+function WalkthroughDot({ paths }: { paths: { points: { x: number; y: number }[] }[] }) {
+  const ref = useRef<THREE.Mesh>(null);
+  // Concatenate all path points into one polyline for now
+  const segments = useMemo(() => {
+    const all = paths.flatMap((p) => p.points);
+    const segs: { a: { x: number; y: number }; b: { x: number; y: number }; len: number }[] = [];
+    for (let i = 0; i < all.length - 1; i++) {
+      const a = all[i];
+      const b = all[i + 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len > 0) segs.push({ a, b, len });
+    }
+    return segs;
+  }, [paths]);
+  const totalLen = useMemo(() => segments.reduce((s, x) => s + x.len, 0), [segments]);
+
+  useFrame((_, delta) => {
+    if (!ref.current || !totalLen) return;
+    ref.current.userData.t = ((ref.current.userData.t ?? 0) + delta * 3) % totalLen; // 3 ft / sec
+    let acc = 0;
+    const t = ref.current.userData.t as number;
+    for (const seg of segments) {
+      if (acc + seg.len >= t) {
+        const u = (t - acc) / seg.len;
+        const x = seg.a.x + (seg.b.x - seg.a.x) * u;
+        const y = seg.a.y + (seg.b.y - seg.a.y) * u;
+        ref.current.position.set(x, 1.2, y);
+        return;
+      }
+      acc += seg.len;
+    }
+  });
+
+  return (
+    <mesh ref={ref} castShadow>
+      <cylinderGeometry args={[0.6, 0.6, 2.5, 12]} />
+      <meshStandardMaterial color="#b45309" emissive="#c2410c" emissiveIntensity={0.4} roughness={0.4} />
+    </mesh>
+  );
+}
 
 function lighten(hex: string, amt: number): string {
   // Lighten a hex color by `amt` (0-1). Keeps it simple, no color libs.
