@@ -18,6 +18,11 @@ const Scene3D = dynamic(() => import("@/components/Scene3D"), {
   loading: () => <div className="h-full w-full grid place-items-center text-ink-400 text-sm">Loading 3D view…</div>,
 });
 
+const CompareView = dynamic(() => import("@/components/CompareView"), {
+  ssr: false,
+  loading: () => <div className="h-full w-full grid place-items-center text-ink-400 text-sm">Loading comparison…</div>,
+});
+
 export default function Page() {
   const removeFurniture = useDesignStore((s) => s.removeFurniture);
   const selectedId = useDesignStore((s) => s.selectedId);
@@ -95,7 +100,9 @@ export default function Page() {
       <div className="flex-1 flex overflow-hidden">
         <FurniturePalette />
         <main className="flex-1 relative overflow-hidden">
-          {view === "2d" ? <FloorPlanCanvas /> : <Scene3D />}
+          {view === "2d" && <FloorPlanCanvas />}
+          {view === "3d" && <Scene3D />}
+          {view === "compare" && <CompareView />}
         </main>
         <PropertiesPanel />
       </div>

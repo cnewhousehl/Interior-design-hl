@@ -21,10 +21,11 @@ import {
   StickyNote,
   FolderOpen,
   Move3d,
-  Compass,
-  Eye,
-  EyeOff,
+  Sun,
+  Plug,
+  Layers as LayersIcon,
 } from "lucide-react";
+import type { LayerVisibility } from "@/lib/types";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, renameLayout } from "@/lib/persistence";
 import type { SavedLayout, ToolMode } from "@/lib/types";
@@ -37,7 +38,6 @@ export default function Toolbar() {
   const clearanceMode = useDesignStore((s) => s.clearanceMode);
   const showDimensions = useDesignStore((s) => s.showDimensions);
   const showGrid = useDesignStore((s) => s.showGrid);
-  const showWalls = useDesignStore((s) => s.showWalls);
   const zoom = useDesignStore((s) => s.zoom);
   const view = useDesignStore((s) => s.view);
 
@@ -46,7 +46,6 @@ export default function Toolbar() {
   const setClearanceMode = useDesignStore((s) => s.setClearanceMode);
   const toggleDimensions = useDesignStore((s) => s.toggleDimensions);
   const toggleGrid = useDesignStore((s) => s.toggleGrid);
-  const toggleWalls = useDesignStore((s) => s.toggleWalls);
   const reset = useDesignStore((s) => s.reset);
   const setZoom = useDesignStore((s) => s.setZoom);
   const fitToView = useDesignStore((s) => s.fitToView);
@@ -171,6 +170,17 @@ export default function Toolbar() {
           disabled={!calibrated}
         />
         <ToolBtn
+          mode="fixture"
+          current={toolMode}
+          onClick={(m) => {
+            setToolMode(m);
+            useDesignStore.getState().setPendingFixtureKind("outlet");
+          }}
+          icon={<Plug className="w-3.5 h-3.5" />}
+          label="O"
+          disabled={!calibrated}
+        />
+        <ToolBtn
           mode="note"
           current={toolMode}
           onClick={setToolMode}
@@ -183,8 +193,9 @@ export default function Toolbar() {
       <div className="divider-v" />
 
       <Toggle active={showDimensions} onClick={toggleDimensions} icon={<TagIcon className="w-3.5 h-3.5" />} label="Labels" />
-      <Toggle active={showWalls} onClick={toggleWalls} icon={<Square className="w-3.5 h-3.5" />} label="Walls" />
       <Toggle active={showGrid} onClick={toggleGrid} icon={<Grid3x3 className="w-3.5 h-3.5" />} label="Grid" />
+      <SunPathToggle />
+      <LayersMenu />
 
       <div className="divider-v" />
 
@@ -205,13 +216,13 @@ export default function Toolbar() {
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
         <div className="seg">
-          {(["2d", "3d"] as const).map((v) => (
+          {(["2d", "3d", "compare"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
               className={`seg-btn flex items-center gap-1 ${view === v ? "seg-btn-active" : ""}`}
             >
-              {v.toUpperCase()}
+              {v === "compare" ? "AB" : v.toUpperCase()}
             </button>
           ))}
         </div>
@@ -312,6 +323,82 @@ function Toggle({
       {icon}
       <span className="hidden lg:inline">{label}</span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sun path toggle
+// ---------------------------------------------------------------------------
+
+function SunPathToggle() {
+  const showSunPath = useDesignStore((s) => s.showSunPath);
+  const toggleSunPath = useDesignStore((s) => s.toggleSunPath);
+  return (
+    <button
+      onClick={toggleSunPath}
+      title="Sun path overlay"
+      className={`btn-md shrink-0 ${showSunPath ? "btn-primary" : "btn-outline"}`}
+    >
+      <Sun className="w-3.5 h-3.5" />
+      <span className="hidden lg:inline">Sun</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layers menu — toggle visibility of every element type
+// ---------------------------------------------------------------------------
+
+function LayersMenu() {
+  const [open, setOpen] = useState(false);
+  const layers = useDesignStore((s) => s.layers);
+  const setLayer = useDesignStore((s) => s.setLayer);
+
+  const rows: { key: keyof LayerVisibility; label: string }[] = [
+    { key: "furniture", label: "Furniture" },
+    { key: "walls", label: "Walls" },
+    { key: "doors", label: "Doors" },
+    { key: "windows", label: "Windows" },
+    { key: "rooms", label: "Rooms" },
+    { key: "annotations", label: "Notes & measurements" },
+    { key: "trafficPaths", label: "Traffic paths" },
+    { key: "fixtures", label: "Fixtures (outlets, etc)" },
+    { key: "zones", label: "Conversation / TV zones" },
+  ];
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Layers"
+        className="btn-outline btn-md"
+      >
+        <LayersIcon className="w-3.5 h-3.5" />
+        <span className="hidden lg:inline">Layers</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-2 card shadow-float z-20 w-56 p-2 animate-slide-up">
+            <div className="label px-2 py-1">Visibility</div>
+            {rows.map((r) => (
+              <label
+                key={r.key}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-ink-100 cursor-pointer text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={layers[r.key]}
+                  onChange={(e) => setLayer(r.key, e.target.checked)}
+                  className="accent-accent-500"
+                />
+                <span className="flex-1">{r.label}</span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

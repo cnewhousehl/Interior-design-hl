@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Image as KImage, Rect, Circle, Line, Text, Group, Label, Tag, Arc } from "react-konva";
+import { Stage, Layer, Image as KImage, Rect, Circle, Line, Text, Group, Label, Tag, Arc, Wedge } from "react-konva";
 import Konva from "konva";
 import useImage from "use-image";
 import { getCatalogItem } from "@/lib/catalog";
 import { useDesignStore } from "@/lib/store";
-import type { CatalogItem, Door, PlacedFurniture, Point, Wall, TrafficPath } from "@/lib/types";
+import type { CatalogItem, Door, FixtureMarker, PlacedFurniture, Point, Wall, TrafficPath } from "@/lib/types";
 import { footprintPolygon, polygonDistance, pxDistance } from "@/lib/geometry";
 import { formatFeet } from "@/lib/format";
+import { computeSunArc } from "@/lib/sunPath";
 
 type Size = { width: number; height: number };
 
@@ -28,14 +29,17 @@ export default function FloorPlanCanvas() {
   const rooms = useDesignStore((s) => s.rooms);
   const annotations = useDesignStore((s) => s.annotations);
   const trafficPaths = useDesignStore((s) => s.trafficPaths);
+  const fixtures = useDesignStore((s) => s.fixtures);
   const selectedId = useDesignStore((s) => s.selectedId);
   const selectedIds = useDesignStore((s) => s.selectedIds);
   const toolMode = useDesignStore((s) => s.toolMode);
   const pendingCatalogId = useDesignStore((s) => s.pendingCatalogId);
+  const pendingFixtureKind = useDesignStore((s) => s.pendingFixtureKind);
   const clearanceMode = useDesignStore((s) => s.clearanceMode);
   const showDimensions = useDesignStore((s) => s.showDimensions);
   const showGrid = useDesignStore((s) => s.showGrid);
-  const showWalls = useDesignStore((s) => s.showWalls);
+  const showSunPath = useDesignStore((s) => s.showSunPath);
+  const layers = useDesignStore((s) => s.layers);
   const zoom = useDesignStore((s) => s.zoom);
   const pan = useDesignStore((s) => s.pan);
   const northDeg = useDesignStore((s) => s.northDeg);
@@ -52,6 +56,8 @@ export default function FloorPlanCanvas() {
   const addDoor = useDesignStore((s) => s.addDoor);
   const addAnnotation = useDesignStore((s) => s.addAnnotation);
   const addTrafficPath = useDesignStore((s) => s.addTrafficPath);
+  const addFixture = useDesignStore((s) => s.addFixture);
+  const removeFixture = useDesignStore((s) => s.removeFixture);
   const setToolMode = useDesignStore((s) => s.setToolMode);
 
   const [calibPoints, setCalibPoints] = useState<Point[]>([]);
@@ -183,6 +189,16 @@ export default function FloorPlanCanvas() {
     if (toolMode === "traffic" && ppf) {
       // Double-click finishes; single click adds point
       setTrafficPoints((prev) => [...prev, feet]);
+      return;
+    }
+
+    if (toolMode === "fixture" && ppf) {
+      const kind = pendingFixtureKind ?? "outlet";
+      addFixture({
+        id: crypto.randomUUID(),
+        position: feet,
+        kind,
+      });
       return;
     }
 
@@ -324,7 +340,7 @@ export default function FloorPlanCanvas() {
           {showGrid && ppf && image && <GridLayer width={image.width} height={image.height} ppf={ppf} />}
         </Layer>
 
-        {ppf && rooms.length > 0 && (
+        {ppf && rooms.length > 0 && layers.rooms && (
           <Layer>
             {rooms.map((r) => {
               const pts = r.polygon.flatMap((p) => [p.x * ppf, p.y * ppf]);
@@ -357,9 +373,9 @@ export default function FloorPlanCanvas() {
           </Layer>
         )}
 
-        {ppf && showWalls && (
+        {ppf && (layers.walls || layers.doors || layers.windows) && (
           <Layer>
-            {walls.map((w) => {
+            {layers.walls && walls.map((w) => {
               const len = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
               const mx = ((w.a.x + w.b.x) / 2) * ppf;
               const my = ((w.a.y + w.b.y) / 2) * ppf;
@@ -381,10 +397,10 @@ export default function FloorPlanCanvas() {
                 </Group>
               );
             })}
-            {windows.map((wn) => (
+            {layers.windows && windows.map((wn) => (
               <WindowMark key={wn.id} w={wn} ppf={ppf} zoom={zoom} />
             ))}
-            {doors.map((d) => (
+            {layers.doors && doors.map((d) => (
               <DoorMark key={d.id} door={d} ppf={ppf} zoom={zoom} />
             ))}
 
@@ -414,8 +430,24 @@ export default function FloorPlanCanvas() {
             ))}
         </Layer>
 
+        {/* Fixtures */}
+        {ppf && layers.fixtures && fixtures.length > 0 && (
+          <Layer>
+            {fixtures.map((f) => (
+              <FixtureRender key={f.id} fixture={f} ppf={ppf} zoom={zoom} onRemove={() => removeFixture(f.id)} />
+            ))}
+          </Layer>
+        )}
+
+        {/* Sun path */}
+        {ppf && showSunPath && image && (
+          <Layer listening={false}>
+            <SunPathRender ppf={ppf} zoom={zoom} centerFt={{ x: image.width / ppf / 2, y: image.height / ppf / 2 }} northDeg={northDeg} radiusFt={Math.max(image.width, image.height) / ppf / 1.6} />
+          </Layer>
+        )}
+
         {/* Traffic paths */}
-        {ppf && (
+        {ppf && layers.trafficPaths && (
           <Layer>
             {trafficPaths.map((p) => (
               <TrafficPathRender key={p.id} path={p} ppf={ppf} zoom={zoom} />
@@ -439,8 +471,9 @@ export default function FloorPlanCanvas() {
           </Layer>
         )}
 
-        {ppf && (
+        {ppf && layers.furniture && (
           <Layer>
+            {layers.zones && <ZonesOverlay ppf={ppf} zoom={zoom} />}
             {placed.filter((p) => !p.hidden).map((item) => (
               <FurnitureShape
                 key={item.id}
@@ -483,7 +516,7 @@ export default function FloorPlanCanvas() {
           </Layer>
         )}
 
-        {ppf && (
+        {ppf && layers.annotations && (
           <Layer>
             {annotations.map((a) => {
               if (a.type === "measure") {
@@ -531,6 +564,19 @@ export default function FloorPlanCanvas() {
         {ppf && clearanceMode !== "off" && (
           <Layer listening={false}>
             <ClearanceOverlay ppf={ppf} zoom={zoom} mode={clearanceMode} walls={walls} />
+          </Layer>
+        )}
+
+        {/* Hover ghost while placing */}
+        {ppf && toolMode === "place" && pendingCatalogId && cursor && (
+          <Layer listening={false}>
+            <PlaceGhost
+              catalogId={pendingCatalogId}
+              cursor={cursor}
+              walls={walls}
+              ppf={ppf}
+              zoom={zoom}
+            />
           </Layer>
         )}
 
@@ -1041,6 +1087,204 @@ function GridLayer({ width, height, ppf }: { width: number; height: number; ppf:
         />
       ))}
     </>
+  );
+}
+
+function FixtureRender({
+  fixture,
+  ppf,
+  zoom,
+  onRemove,
+}: {
+  fixture: FixtureMarker;
+  ppf: number;
+  zoom: number;
+  onRemove: () => void;
+}) {
+  const cx = fixture.position.x * ppf;
+  const cy = fixture.position.y * ppf;
+  const r = 8 / zoom;
+  const palette: Record<string, { fill: string; symbol: string }> = {
+    outlet: { fill: "#1c1917", symbol: "⏚" },
+    switch: { fill: "#0369a1", symbol: "S" },
+    vent: { fill: "#7c3aed", symbol: "V" },
+    "ceiling-light": { fill: "#eab308", symbol: "○" },
+    "wall-light": { fill: "#eab308", symbol: "◐" },
+    radiator: { fill: "#dc2626", symbol: "R" },
+    plumbing: { fill: "#0ea5e9", symbol: "P" },
+  };
+  const { fill, symbol } = palette[fixture.kind] ?? palette.outlet;
+  return (
+    <Group
+      x={cx}
+      y={cy}
+      onClick={(e) => {
+        e.cancelBubble = true;
+        if (e.evt.shiftKey || e.evt.metaKey) onRemove();
+      }}
+      onTap={() => {}}
+    >
+      <Circle radius={r} fill="white" stroke={fill} strokeWidth={1.5 / zoom} />
+      <Text
+        text={symbol}
+        x={-r}
+        y={-r * 0.85}
+        width={r * 2}
+        height={r * 1.7}
+        align="center"
+        verticalAlign="middle"
+        fontSize={r * 1.2}
+        fill={fill}
+        fontStyle="700"
+      />
+    </Group>
+  );
+}
+
+function SunPathRender({
+  ppf,
+  zoom,
+  centerFt,
+  radiusFt,
+  northDeg,
+}: {
+  ppf: number;
+  zoom: number;
+  centerFt: Point;
+  radiusFt: number;
+  northDeg: number;
+}) {
+  const { arcPath, marks } = computeSunArc({ centerFt, radiusFt, northDeg });
+  const points = arcPath.flatMap((p) => [p.x * ppf, p.y * ppf]);
+  return (
+    <Group opacity={0.85}>
+      <Line points={points} stroke="#f59e0b" strokeWidth={2 / zoom} dash={[6 / zoom, 4 / zoom]} />
+      {marks.map((m, i) => (
+        <Group key={i} opacity={m.intensity}>
+          <Circle x={m.position.x * ppf} y={m.position.y * ppf} radius={8 / zoom} fill="#fbbf24" stroke="#92400e" strokeWidth={1 / zoom} />
+          <Text
+            text={m.label}
+            x={m.position.x * ppf - 12 / zoom}
+            y={m.position.y * ppf - 22 / zoom}
+            width={24 / zoom}
+            align="center"
+            fontSize={9 / zoom}
+            fontStyle="700"
+            fill="#92400e"
+          />
+        </Group>
+      ))}
+    </Group>
+  );
+}
+
+function ZonesOverlay({ ppf, zoom }: { ppf: number; zoom: number }) {
+  const placed = useDesignStore((s) => s.placed);
+  const selectedIds = useDesignStore((s) => s.selectedIds);
+  // Only render zones for selected pieces to reduce noise
+  const focus = placed.filter((p) => selectedIds.includes(p.id) && !p.hidden);
+  return (
+    <>
+      {focus.map((p) => {
+        const cat = getCatalogItem(p.catalogId);
+        if (!cat) return null;
+        // Conversation zone around seating
+        if (cat.category === "seating" && !cat.id.includes("dining") && !cat.id.includes("barstool")) {
+          return (
+            <Group key={`conv-${p.id}`} x={p.x * ppf} y={p.y * ppf}>
+              <Circle
+                radius={5 * ppf}
+                stroke="#5d7a5a"
+                strokeWidth={1 / zoom}
+                dash={[6 / zoom, 4 / zoom]}
+                fill="rgba(93, 122, 90, 0.04)"
+                opacity={0.7}
+              />
+              <Label x={0} y={-5 * ppf - 14 / zoom}>
+                <Tag fill="rgba(93, 122, 90, 0.92)" cornerRadius={3} />
+                <Text text="Conversation zone · 10'" fontSize={9 / zoom} fill="white" padding={2 / zoom} fontStyle="600" />
+              </Label>
+            </Group>
+          );
+        }
+        // TV viewing wedge in front of TV stand (front = local -Y)
+        if (cat.id === "tv-stand") {
+          const w = p.widthOverride ?? cat.width;
+          const screenDiag = w * 0.85; // approximate TV diagonal as 85% of stand width
+          const minDist = screenDiag * 1.5;
+          const maxDist = screenDiag * 2.5;
+          return (
+            <Group key={`tv-${p.id}`} x={p.x * ppf} y={p.y * ppf} rotation={p.rotation - 90}>
+              <Wedge
+                radius={maxDist * ppf}
+                angle={60}
+                rotation={-30}
+                fill="rgba(180, 83, 9, 0.06)"
+                stroke="#b45309"
+                strokeWidth={1 / zoom}
+                dash={[6 / zoom, 4 / zoom]}
+                opacity={0.7}
+              />
+              <Circle radius={minDist * ppf} stroke="#b45309" strokeWidth={1 / zoom} dash={[4 / zoom, 4 / zoom]} opacity={0.5} />
+              <Label x={(maxDist * ppf) / 1.5} y={-14 / zoom} rotation={90 - p.rotation}>
+                <Tag fill="rgba(180, 83, 9, 0.92)" cornerRadius={3} />
+                <Text text={`Viewing ${minDist.toFixed(1)}–${maxDist.toFixed(1)}'`} fontSize={9 / zoom} fill="white" padding={2 / zoom} fontStyle="600" />
+              </Label>
+            </Group>
+          );
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
+function PlaceGhost({
+  catalogId,
+  cursor,
+  walls,
+  ppf,
+  zoom,
+}: {
+  catalogId: string;
+  cursor: Point;
+  walls: Wall[];
+  ppf: number;
+  zoom: number;
+}) {
+  const cat = getCatalogItem(catalogId);
+  if (!cat) return null;
+  const snap = snapToNearestWall(cursor, cat, 0, walls);
+  const w = cat.width * ppf;
+  const d = cat.depth * ppf;
+  return (
+    <Group x={snap.x * ppf} y={snap.y * ppf} rotation={snap.rotation} opacity={0.55}>
+      {cat.shape === "circle" ? (
+        <Circle radius={w / 2} fill={cat.color} stroke="#b45309" strokeWidth={1.5 / zoom} dash={[4 / zoom, 3 / zoom]} />
+      ) : cat.shape === "l-shape" && cat.lShape ? (
+        <LShape
+          width={w}
+          depth={d}
+          notchWidth={cat.lShape.notchWidth * ppf}
+          notchDepth={cat.lShape.notchDepth * ppf}
+          fill={cat.color}
+          stroke="#b45309"
+          strokeWidth={1.5 / zoom}
+        />
+      ) : (
+        <Rect
+          x={-w / 2}
+          y={-d / 2}
+          width={w}
+          height={d}
+          fill={cat.color}
+          stroke="#b45309"
+          strokeWidth={1.5 / zoom}
+          dash={[4 / zoom, 3 / zoom]}
+          cornerRadius={Math.min(w, d) * 0.05}
+        />
+      )}
+    </Group>
   );
 }
 

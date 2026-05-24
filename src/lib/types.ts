@@ -120,10 +120,12 @@ export type TrafficPath = {
 };
 
 /** Electrical outlet / light fixture / etc. */
+export type FixtureKind = "outlet" | "switch" | "vent" | "ceiling-light" | "wall-light" | "radiator" | "plumbing";
+
 export type FixtureMarker = {
   id: string;
   position: Point;
-  kind: "outlet" | "switch" | "vent" | "fixture";
+  kind: FixtureKind;
   label?: string;
 };
 
@@ -185,9 +187,21 @@ export type ToolMode =
   | "measure"
   | "note"
   | "traffic"
-  | "outlet";
+  | "fixture";
 
-export type ViewMode = "2d" | "3d";
+export type LayerVisibility = {
+  furniture: boolean;
+  walls: boolean;
+  doors: boolean;
+  windows: boolean;
+  rooms: boolean;
+  annotations: boolean;
+  trafficPaths: boolean;
+  fixtures: boolean;
+  zones: boolean;
+};
+
+export type ViewMode = "2d" | "3d" | "compare";
 
 export type ClearanceMode = "off" | "all" | "selected";
 

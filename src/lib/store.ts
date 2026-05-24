@@ -6,8 +6,10 @@ import type {
   CalibrationPoints,
   ClearanceMode,
   Door,
+  FixtureKind,
   FixtureMarker,
   FloorPlan,
+  LayerVisibility,
   PlacedFurniture,
   Room,
   SavedLayout,
@@ -45,6 +47,10 @@ type StoreState = {
   ceilingHeightFt: number;
   view: ViewMode;
   fitRequest: number;
+  pendingFixtureKind: FixtureKind | null;
+  showSunPath: boolean;
+  showZones: boolean;
+  layers: LayerVisibility;
 
   setFloorPlan: (fp: FloorPlan | null) => void;
   setCalibration: (cal: CalibrationPoints, pixelsPerFoot: number) => void;
@@ -96,6 +102,10 @@ type StoreState = {
   setCeilingHeight: (ft: number) => void;
   setView: (v: ViewMode) => void;
   fitToView: () => void;
+  setPendingFixtureKind: (k: FixtureKind | null) => void;
+  toggleSunPath: () => void;
+  toggleZones: () => void;
+  setLayer: <K extends keyof LayerVisibility>(k: K, on: boolean) => void;
   reset: () => void;
 
   importScene: (partial: Partial<SavedLayout>) => void;
@@ -127,6 +137,20 @@ const initial = {
   ceilingHeightFt: 9,
   view: "2d" as ViewMode,
   fitRequest: 0,
+  pendingFixtureKind: null,
+  showSunPath: false,
+  showZones: true,
+  layers: {
+    furniture: true,
+    walls: true,
+    doors: true,
+    windows: true,
+    rooms: true,
+    annotations: true,
+    trafficPaths: true,
+    fixtures: true,
+    zones: true,
+  } as LayerVisibility,
 };
 
 const creator: StateCreator<StoreState> = (set, get) => ({
@@ -232,6 +256,10 @@ const creator: StateCreator<StoreState> = (set, get) => ({
   setCeilingHeight: (ft) => set({ ceilingHeightFt: Math.max(6, Math.min(20, ft)) }),
   setView: (v) => set({ view: v }),
   fitToView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
+  setPendingFixtureKind: (k) => set({ pendingFixtureKind: k }),
+  toggleSunPath: () => set((s) => ({ showSunPath: !s.showSunPath })),
+  toggleZones: () => set((s) => ({ showZones: !s.showZones })),
+  setLayer: (k, on) => set((s) => ({ layers: { ...s.layers, [k]: on } })),
 
   reset: () => set({ ...initial }),
 
