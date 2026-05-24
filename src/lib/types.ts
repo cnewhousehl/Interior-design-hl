@@ -59,6 +59,8 @@ export type CatalogItem = {
  * Position is in real-world feet (scene coordinates), measured at the piece's center.
  * Rotation is in degrees, clockwise.
  */
+export type FurnitureStatus = "owned" | "wishlist" | "ordered" | "considering";
+
 export type PlacedFurniture = {
   id: string;
   catalogId: string;
@@ -69,6 +71,68 @@ export type PlacedFurniture = {
   // Optional override of catalog dimensions (e.g. user resized their actual couch)
   widthOverride?: number;
   depthOverride?: number;
+  status?: FurnitureStatus;
+  priceUsd?: number;
+  notes?: string;
+  colorOverride?: string;
+};
+
+/** A wall segment between two points (in feet, scene coords). */
+export type Wall = {
+  id: string;
+  a: Point;
+  b: Point;
+  thicknessFt?: number; // default ~0.4
+};
+
+/** A door anchored on a wall, with a swing arc. */
+export type Door = {
+  id: string;
+  position: Point; // hinge point in feet, scene coords
+  widthFt: number;
+  angleDeg: number; // angle of the wall the door sits in
+  swing: "left" | "right";
+  openDeg?: number; // how far open to display, default 90
+  label?: string;
+};
+
+/** A window on a wall (visual only — doesn't constrain furniture). */
+export type WindowOpening = {
+  id: string;
+  position: Point;
+  widthFt: number;
+  angleDeg: number;
+  label?: string;
+};
+
+/** A room polygon (auto-built from walls, or drawn). */
+export type Room = {
+  id: string;
+  name: string;
+  polygon: Point[]; // feet, scene coords, clockwise
+  color?: string;
+};
+
+/** Measurement / note annotations on the canvas. */
+export type Annotation =
+  | { id: string; type: "measure"; a: Point; b: Point }
+  | { id: string; type: "note"; position: Point; text: string };
+
+/** A complete saved layout that can be persisted/restored. */
+export type SavedLayout = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  floorPlan: FloorPlan | null;
+  placed: PlacedFurniture[];
+  walls: Wall[];
+  doors: Door[];
+  windows: WindowOpening[];
+  rooms: Room[];
+  annotations: Annotation[];
+  theme: Theme | null;
+  northDeg: number; // compass orientation of "up" in degrees clockwise from north
 };
 
 export type CalibrationPoints = {
@@ -89,6 +153,19 @@ export type FloorPlan = {
 export type ToolMode =
   | "select"
   | "place" // user has selected a catalog item and is placing it
-  | "calibrate"; // user is clicking 2 points on the floor plan to set scale
+  | "calibrate" // user is clicking 2 points on the floor plan to set scale
+  | "draw-wall"
+  | "draw-door"
+  | "draw-window"
+  | "measure"
+  | "note";
 
 export type ClearanceMode = "off" | "all" | "selected";
+
+export type Issue = {
+  id: string;
+  severity: "error" | "warn" | "info";
+  message: string;
+  furnitureId?: string;
+  doorId?: string;
+};
