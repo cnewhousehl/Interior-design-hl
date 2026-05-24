@@ -121,8 +121,23 @@ export type TrafficPath = {
   label?: string;
 };
 
-/** Electrical outlet / light fixture / etc. */
-export type FixtureKind = "outlet" | "switch" | "vent" | "ceiling-light" | "wall-light" | "radiator" | "plumbing";
+/** Electrical outlet / light fixture / appliance / etc. */
+export type FixtureKind =
+  | "outlet"
+  | "switch"
+  | "vent"
+  | "ceiling-light"
+  | "wall-light"
+  | "radiator"
+  | "plumbing"
+  | "sink"
+  | "range"
+  | "fridge"
+  | "dishwasher"
+  | "washer-dryer"
+  | "toilet"
+  | "shower"
+  | "tub";
 
 export type FixtureMarker = {
   id: string;

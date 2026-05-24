@@ -418,6 +418,14 @@ function NoSelectionPanel() {
     { v: "wall-light", label: "Wall", color: "#eab308" },
     { v: "radiator", label: "Radiator", color: "#dc2626" },
     { v: "plumbing", label: "Plumbing", color: "#0ea5e9" },
+    { v: "sink", label: "Sink", color: "#0ea5e9" },
+    { v: "range", label: "Range", color: "#dc2626" },
+    { v: "fridge", label: "Fridge", color: "#0369a1" },
+    { v: "dishwasher", label: "Dishwasher", color: "#0891b2" },
+    { v: "washer-dryer", label: "W/D", color: "#7c3aed" },
+    { v: "toilet", label: "Toilet", color: "#0f766e" },
+    { v: "shower", label: "Shower", color: "#0ea5e9" },
+    { v: "tub", label: "Tub", color: "#0ea5e9" },
   ];
 
   return (

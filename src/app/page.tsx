@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import Toolbar from "@/components/Toolbar";
 import FurniturePalette from "@/components/FurniturePalette";
 import PropertiesPanel from "@/components/PropertiesPanel";
+import OnboardingBanner from "@/components/OnboardingBanner";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { tryLoadFromHash } from "@/lib/share";
 
@@ -109,6 +110,7 @@ export default function Page() {
           {view === "3d" && <Scene3D />}
           {view === "elevation" && <ElevationView />}
           {view === "compare" && <CompareView />}
+          {view === "2d" && <OnboardingBanner />}
         </main>
         <PropertiesPanel />
       </div>

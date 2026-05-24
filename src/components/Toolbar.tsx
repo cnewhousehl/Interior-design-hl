@@ -30,7 +30,7 @@ import {
 import type { LayerVisibility } from "@/lib/types";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, renameLayout } from "@/lib/persistence";
-import type { SavedLayout, ToolMode } from "@/lib/types";
+import type { SavedLayout, ToolMode, FixtureKind } from "@/lib/types";
 import IdentifyFromPhoto from "./IdentifyFromPhoto";
 import { exportPdf } from "@/lib/pdfExport";
 
@@ -205,8 +205,20 @@ export default function Toolbar() {
 
       <div className="divider-v" />
 
-      <Toggle active={showDimensions} onClick={toggleDimensions} icon={<TagIcon className="w-3.5 h-3.5" />} label="Labels" />
-      <Toggle active={showGrid} onClick={toggleGrid} icon={<Grid3x3 className="w-3.5 h-3.5" />} label="Grid" />
+      <Toggle
+        active={showDimensions}
+        onClick={toggleDimensions}
+        icon={<TagIcon className="w-3.5 h-3.5" />}
+        label="Labels"
+        title="Toggle labels — show name + dimensions on each piece"
+      />
+      <Toggle
+        active={showGrid}
+        onClick={toggleGrid}
+        icon={<Grid3x3 className="w-3.5 h-3.5" />}
+        label="Grid"
+        title="Toggle 1-ft grid overlay"
+      />
       <SunPathToggle />
       <LayersMenu />
 
@@ -288,6 +300,19 @@ function IconBtn({
   );
 }
 
+const TOOL_TITLES: Record<ToolMode, string> = {
+  select: "Select & move (V) — click a piece to select, drag to move, double-click to rotate 90°",
+  place: "Place mode — pick a piece from the left palette, then click on the canvas",
+  calibrate: "Calibrate scale — click two points on the plan with a known real-world distance",
+  "draw-wall": "Draw wall (W) — click to start, click to end. Esc to cancel",
+  "draw-door": "Draw door (D) — click near a wall to anchor",
+  "draw-window": "Draw window (Wn) — click near a wall to anchor",
+  measure: "Measure (M) — click two points to display the distance",
+  note: "Note (N) — click anywhere to drop a text annotation",
+  traffic: "Traffic path (T) — click waypoints, double-click to finish. Shows clearance corridor",
+  fixture: "Fixture (O) — drop outlet/light/switch/sink/range markers",
+};
+
 function ToolBtn({
   mode,
   current,
@@ -308,7 +333,7 @@ function ToolBtn({
     <button
       onClick={() => onClick(mode)}
       disabled={disabled}
-      title={mode}
+      title={TOOL_TITLES[mode] ?? mode}
       className={`seg-btn flex items-center gap-1 ${active ? "seg-btn-active" : ""} disabled:opacity-30`}
     >
       {icon}
@@ -322,16 +347,18 @@ function Toggle({
   onClick,
   icon,
   label,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      title={label}
+      title={title ?? label}
       className={`btn-md shrink-0 ${active ? "btn-primary" : "btn-outline"}`}
     >
       {icon}
@@ -526,10 +553,30 @@ function LayoutsMenu() {
 // Auto-detect
 // ---------------------------------------------------------------------------
 
+const VALID_FIXTURE_KINDS = new Set([
+  "outlet",
+  "switch",
+  "vent",
+  "ceiling-light",
+  "wall-light",
+  "radiator",
+  "plumbing",
+  "sink",
+  "range",
+  "fridge",
+  "dishwasher",
+  "washer-dryer",
+  "toilet",
+  "shower",
+  "tub",
+]);
+
 function AutoDetectButton() {
   const floorPlan = useDesignStore((s) => s.floorPlan);
   const setRooms = useDesignStore((s) => s.setRooms);
   const setDoors = useDesignStore((s) => s.setDoors);
+  const setWalls = useDesignStore((s) => s.setWalls);
+  const setFixtures = useDesignStore((s) => s.setFixtures);
   const [busy, setBusy] = useState(false);
   const ppf = floorPlan?.pixelsPerFoot ?? null;
 
@@ -553,7 +600,9 @@ function AutoDetectButton() {
       const data = (await res.json()) as {
         error?: string;
         rooms?: { name: string; x: number; y: number; width: number; height: number }[];
+        walls?: { x1: number; y1: number; x2: number; y2: number }[];
         doors?: { label: string; x: number; y: number; widthFt: number; angleDeg: number; swing: "left" | "right" }[];
+        fixtures?: { kind: string; x: number; y: number; label?: string }[];
       };
       if (data.error) {
         alert(`Detection failed: ${data.error}`);
@@ -569,6 +618,12 @@ function AutoDetectButton() {
           { x: r.x / ppf, y: (r.y + r.height) / ppf },
         ],
       }));
+      const walls = (data.walls ?? []).map((w) => ({
+        id: crypto.randomUUID(),
+        a: { x: w.x1 / ppf, y: w.y1 / ppf },
+        b: { x: w.x2 / ppf, y: w.y2 / ppf },
+        thicknessFt: 0.4,
+      }));
       const doors = (data.doors ?? []).map((d) => ({
         id: crypto.randomUUID(),
         position: { x: d.x / ppf, y: d.y / ppf },
@@ -578,8 +633,18 @@ function AutoDetectButton() {
         openDeg: 90,
         label: d.label,
       }));
+      const fixtures = (data.fixtures ?? [])
+        .filter((f) => VALID_FIXTURE_KINDS.has(f.kind))
+        .map((f) => ({
+          id: crypto.randomUUID(),
+          position: { x: f.x / ppf, y: f.y / ppf },
+          kind: f.kind as FixtureKind,
+          label: f.label,
+        }));
       setRooms(rooms);
+      if (walls.length) setWalls(walls);
       setDoors(doors);
+      if (fixtures.length) setFixtures(fixtures);
     } catch (err) {
       alert(`Detection error: ${err}`);
     } finally {
@@ -588,7 +653,12 @@ function AutoDetectButton() {
   };
 
   return (
-    <button onClick={run} disabled={!ppf || busy} className="btn-outline btn-md shrink-0">
+    <button
+      onClick={run}
+      disabled={!ppf || busy}
+      className="btn-outline btn-md shrink-0"
+      title="Auto-detect rooms, walls, doors, and kitchen/bath fixtures from the floor plan (requires calibration + ANTHROPIC_API_KEY)"
+    >
       <Sparkles className={`w-3.5 h-3.5 ${busy ? "animate-pulse text-accent-500" : "text-accent-500"}`} />
       <span>{busy ? "Detecting…" : "Auto-detect"}</span>
     </button>

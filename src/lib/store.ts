@@ -82,6 +82,7 @@ type StoreState = {
 
   addFixture: (f: FixtureMarker) => void;
   removeFixture: (id: string) => void;
+  setFixtures: (fixtures: FixtureMarker[]) => void;
 
   setRooms: (rooms: Room[]) => void;
   updateRoom: (id: string, partial: Partial<Room>) => void;
@@ -239,6 +240,7 @@ const creator: StateCreator<StoreState> = (set, get) => ({
 
   addFixture: (f) => set((s) => ({ fixtures: [...s.fixtures, f] })),
   removeFixture: (id) => set((s) => ({ fixtures: s.fixtures.filter((f) => f.id !== id) })),
+  setFixtures: (fixtures) => set({ fixtures }),
 
   setRooms: (rooms) => set({ rooms }),
   updateRoom: (id, partial) =>

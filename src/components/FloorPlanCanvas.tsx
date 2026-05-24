@@ -936,19 +936,30 @@ function FurnitureShape({
         <Line points={[0, -d / 2, 0, -d / 2 + Math.min(d * 0.2, 14 / zoom)]} stroke="white" strokeWidth={2 / zoom} />
       )}
 
-      {showDimensions && (
-        <Label x={0} y={0}>
-          <Tag fill="rgba(28, 25, 23, 0.85)" cornerRadius={3} />
-          <Text
-            text={`${item.label}\n${formatFeet(item.widthOverride ?? catalog.width)} × ${formatFeet(item.depthOverride ?? catalog.depth)}`}
-            fontSize={10 / zoom}
-            fill="#fafaf9"
-            padding={4 / zoom}
-            align="center"
-            rotation={-item.rotation}
-            lineHeight={1.2}
-          />
-        </Label>
+      {(showDimensions || selected) && (
+        // Counter-rotate so the label sits in scene-aligned coords (always horizontal),
+        // and offset it just outside the piece's bounding circle so it never covers the shape.
+        <Group rotation={-item.rotation} listening={false}>
+          <Label x={0} y={-Math.max(w, d) / 2 - 6 / zoom}>
+            <Tag
+              fill={selected ? "rgba(180, 83, 9, 0.95)" : "rgba(250, 246, 238, 0.96)"}
+              stroke={selected ? "rgba(180, 83, 9, 1)" : "rgba(28, 25, 23, 0.18)"}
+              strokeWidth={0.75 / zoom}
+              cornerRadius={3}
+              pointerDirection="down"
+              pointerWidth={6 / zoom}
+              pointerHeight={4 / zoom}
+            />
+            <Text
+              text={`${item.label} · ${formatFeet(item.widthOverride ?? catalog.width)}×${formatFeet(item.depthOverride ?? catalog.depth)}`}
+              fontSize={10 / zoom}
+              fill={selected ? "#fafaf9" : "#1c1917"}
+              padding={4 / zoom}
+              align="center"
+              lineHeight={1.2}
+            />
+          </Label>
+        </Group>
       )}
     </Group>
   );
@@ -1227,8 +1238,18 @@ function FixtureRender({
     "wall-light": { fill: "#eab308", symbol: "◐" },
     radiator: { fill: "#dc2626", symbol: "R" },
     plumbing: { fill: "#0ea5e9", symbol: "P" },
+    sink: { fill: "#0ea5e9", symbol: "⌀" },
+    range: { fill: "#dc2626", symbol: "♨" },
+    fridge: { fill: "#0369a1", symbol: "F" },
+    dishwasher: { fill: "#0891b2", symbol: "DW" },
+    "washer-dryer": { fill: "#7c3aed", symbol: "W/D" },
+    toilet: { fill: "#0f766e", symbol: "T" },
+    shower: { fill: "#0ea5e9", symbol: "▤" },
+    tub: { fill: "#0ea5e9", symbol: "▭" },
   };
   const { fill, symbol } = palette[fixture.kind] ?? palette.outlet;
+  // Shrink font for multi-char symbols so they fit inside the circle.
+  const fontSize = symbol.length <= 1 ? r * 1.2 : symbol.length === 2 ? r * 0.9 : r * 0.7;
   return (
     <Group
       x={cx}
@@ -1248,10 +1269,23 @@ function FixtureRender({
         height={r * 1.7}
         align="center"
         verticalAlign="middle"
-        fontSize={r * 1.2}
+        fontSize={fontSize}
         fill={fill}
         fontStyle="700"
       />
+      {fixture.label && (
+        <Text
+          text={fixture.label}
+          x={-30 / zoom}
+          y={r + 2 / zoom}
+          width={60 / zoom}
+          align="center"
+          fontSize={9 / zoom}
+          fill="#44403c"
+          fontStyle="600"
+          listening={false}
+        />
+      )}
     </Group>
   );
 }

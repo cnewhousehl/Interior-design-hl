@@ -35,21 +35,31 @@ export async function POST(req: NextRequest) {
 
   const prompt = `You are looking at a residential floor plan image. The image is ${imageWidth}px × ${imageHeight}px and the calibrated scale is ${pixelsPerFoot.toFixed(2)} pixels per foot.
 
-Identify each distinct room (Living/Dining, Bedroom, Bathroom, Kitchen, Terrace, Entry/Foyer, Closet, Laundry, etc.). For each room, return an axis-aligned bounding rectangle in image pixel coordinates that covers the interior floor area (NOT including walls).
-
-Also identify each door — return its hinge point in image pixels, approximate opening width in feet, and which way it swings.
+Identify:
+1. Each distinct room (Living/Dining, Bedroom, Bathroom, Kitchen, Terrace, Entry/Foyer, Closet, Laundry, etc.). For each, return an axis-aligned bounding rectangle in image pixel coordinates covering the interior floor area (NOT including walls).
+2. Each major wall segment — return endpoints (x1,y1)-(x2,y2). Include exterior perimeter walls AND interior partition walls. Use straight axis-aligned segments only; for L-shaped walls, return them as multiple segments.
+3. Each door — hinge point, opening width in feet, swing direction.
+4. Each fixture/appliance visible — kitchen sink, range/stove, refrigerator, dishwasher, washer/dryer, toilet, shower, bathtub. Position is the center of the fixture. Use the listed kind strings exactly.
 
 Respond with ONLY valid JSON (no markdown fences, no prose). Schema:
 {
   "rooms": [
     { "name": "Bedroom", "x": <px>, "y": <px>, "width": <px>, "height": <px> }
   ],
+  "walls": [
+    { "x1": <px>, "y1": <px>, "x2": <px>, "y2": <px> }
+  ],
   "doors": [
     { "label": "Bedroom door", "x": <px>, "y": <px>, "widthFt": <number>, "angleDeg": <0-360>, "swing": "left" | "right" }
+  ],
+  "fixtures": [
+    { "kind": "sink" | "range" | "fridge" | "dishwasher" | "washer-dryer" | "toilet" | "shower" | "tub", "x": <px>, "y": <px>, "label": "Kitchen sink" }
   ]
 }
 
-Where (x,y) is the top-left corner of the bounding box, measured from the top-left of the image. For doors, angleDeg=0 means the wall runs horizontally to the right.`;
+Where (x,y) is the top-left corner of the bounding box (rooms) or the center point (doors, fixtures), measured from the top-left of the image. For doors, angleDeg=0 means the wall runs horizontally to the right.
+
+Be conservative — only include things you're highly confident about. Skip ambiguous items rather than guessing.`;
 
   try {
     const resp = await client.messages.create({
@@ -83,8 +93,10 @@ Where (x,y) is the top-left corner of the bounding box, measured from the top-le
       .join("");
     const json = extractJson(text);
     const parsed = JSON.parse(json) as {
-      rooms: { name: string; x: number; y: number; width: number; height: number }[];
-      doors: { label: string; x: number; y: number; widthFt: number; angleDeg: number; swing: "left" | "right" }[];
+      rooms?: { name: string; x: number; y: number; width: number; height: number }[];
+      walls?: { x1: number; y1: number; x2: number; y2: number }[];
+      doors?: { label: string; x: number; y: number; widthFt: number; angleDeg: number; swing: "left" | "right" }[];
+      fixtures?: { kind: string; x: number; y: number; label?: string }[];
     };
     return NextResponse.json(parsed);
   } catch (err) {
