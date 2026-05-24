@@ -189,6 +189,7 @@ export const CATALOG: CatalogItem[] = [
     themes: ["industrial", "minimalist", "scandi", "mid-century-modern"],
     color: "#4d3a2a",
     recommendedClearance: 3,
+    needsOutlet: true,
   },
   {
     id: "console-table",
@@ -304,6 +305,8 @@ export const CATALOG: CatalogItem[] = [
     themes: ["mid-century-modern", "scandi", "industrial", "minimalist"],
     color: "#3d2e22",
     recommendedClearance: 1,
+    needsOutlet: true,
+    tvViewing: true,
   },
 
   // ----- rugs -----
@@ -365,6 +368,7 @@ export const CATALOG: CatalogItem[] = [
     themes: ["mid-century-modern", "scandi", "industrial", "art-deco", "japandi"],
     color: "#222",
     recommendedClearance: 0.5,
+    needsOutlet: true,
   },
 
   // ----- misc -----

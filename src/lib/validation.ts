@@ -1,6 +1,6 @@
 import { getCatalogItem } from "./catalog";
 import { footprintPolygon, polygonDistance } from "./geometry";
-import type { Door, Issue, PlacedFurniture, Point, TrafficPath, Wall } from "./types";
+import type { Door, FixtureMarker, Issue, PlacedFurniture, Point, TrafficPath, Wall } from "./types";
 
 /**
  * Run all the checks an interior designer cares about:
@@ -10,14 +10,20 @@ import type { Door, Issue, PlacedFurniture, Point, TrafficPath, Wall } from "./t
  *  - clearance to a piece is below its recommended value
  *  - dining seating crammed (chairs need ≥3' from table edge to wall)
  */
+const OUTLET_REACH_FT = 6;
+
 export function runValidation(args: {
   placed: PlacedFurniture[];
   walls: Wall[];
   doors: Door[];
   trafficPaths?: TrafficPath[];
+  fixtures?: FixtureMarker[];
 }): Issue[] {
-  const { placed, walls, doors, trafficPaths = [] } = args;
+  const { placed, walls, doors, trafficPaths = [], fixtures = [] } = args;
   const out: Issue[] = [];
+  const outlets = fixtures.filter((f) => f.kind === "outlet");
+  const radiators = fixtures.filter((f) => f.kind === "radiator");
+  const vents = fixtures.filter((f) => f.kind === "vent");
 
   const polys = placed.map((p) => {
     const cat = getCatalogItem(p.catalogId);
@@ -84,6 +90,42 @@ export function runValidation(args: {
           message: `${p.label} blocks the ${door.label ?? "door"} swing.`,
           furnitureId: p.id,
           doorId: door.id,
+        });
+      }
+    }
+  }
+
+  // outlet reach — any piece needing an outlet must have one within OUTLET_REACH_FT
+  if (outlets.length || placed.some((p) => getCatalogItem(p.catalogId)?.needsOutlet)) {
+    for (const { p, cat, poly } of polys) {
+      if (!cat?.needsOutlet || !poly.length) continue;
+      const minDist = Math.min(
+        ...outlets.map((o) => Math.min(...poly.map((pt) => Math.hypot(pt.x - o.position.x, pt.y - o.position.y)))),
+        Infinity,
+      );
+      if (minDist > OUTLET_REACH_FT) {
+        out.push({
+          id: `outlet-${p.id}`,
+          severity: "warn",
+          message: outlets.length
+            ? `${p.label} is ${minDist.toFixed(1)}' from the nearest outlet (typical cord reach is ${OUTLET_REACH_FT}').`
+            : `${p.label} needs an outlet — drop one with the Outlet tool.`,
+          furnitureId: p.id,
+        });
+      }
+    }
+  }
+
+  // radiator / vent overlap — piece should not sit on top of one
+  for (const fixture of [...radiators, ...vents]) {
+    for (const { p, poly, cat } of polys) {
+      if (!poly.length || cat?.category === "rugs") continue;
+      if (pointInPolygon(fixture.position, poly)) {
+        out.push({
+          id: `block-${p.id}-${fixture.id}`,
+          severity: "warn",
+          message: `${p.label} sits on top of a ${fixture.kind} — air flow / radiator output will be blocked.`,
+          furnitureId: p.id,
         });
       }
     }
@@ -200,6 +242,14 @@ function pointInPolygon(p: Point, poly: Point[]): boolean {
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+/** Return the room id whose polygon contains the given point, or null. */
+export function findRoomAt(point: Point, rooms: { id: string; polygon: Point[] }[]): string | null {
+  for (const r of rooms) {
+    if (pointInPolygon(point, r.polygon)) return r.id;
+  }
+  return null;
 }
 
 /** Compute the area of a polygon in feet². */

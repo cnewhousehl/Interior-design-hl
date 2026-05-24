@@ -20,7 +20,7 @@ import { useDesignStore } from "@/lib/store";
 import { defaultPrice, getCatalogItem } from "@/lib/catalog";
 import { ALL_THEMES, type FurnitureStatus, type Theme } from "@/lib/types";
 import { formatFeet, formatSqft } from "@/lib/format";
-import { runValidation, polygonAreaSqft } from "@/lib/validation";
+import { runValidation, polygonAreaSqft, findRoomAt } from "@/lib/validation";
 import { MOODBOARDS } from "@/lib/moodboard";
 import { downloadShoppingCsv, buildShoppingList } from "@/lib/shoppingList";
 import { encodeShareUrl } from "@/lib/share";
@@ -45,9 +45,10 @@ export default function PropertiesPanel() {
   const rooms = useDesignStore((s) => s.rooms);
   const theme = useDesignStore((s) => s.theme);
 
+  const fixtures = useDesignStore((s) => s.fixtures);
   const issues = useMemo(
-    () => runValidation({ placed, walls, doors, trafficPaths }),
-    [placed, walls, doors, trafficPaths],
+    () => runValidation({ placed, walls, doors, trafficPaths, fixtures }),
+    [placed, walls, doors, trafficPaths, fixtures],
   );
 
   const totalSqft = useMemo(
@@ -490,9 +491,10 @@ function IssuesTab() {
   const doors = useDesignStore((s) => s.doors);
   const trafficPaths = useDesignStore((s) => s.trafficPaths);
   const setSelected = useDesignStore((s) => s.setSelected);
+  const fixtures = useDesignStore((s) => s.fixtures);
   const issues = useMemo(
-    () => runValidation({ placed, walls, doors, trafficPaths }),
-    [placed, walls, doors, trafficPaths],
+    () => runValidation({ placed, walls, doors, trafficPaths, fixtures }),
+    [placed, walls, doors, trafficPaths, fixtures],
   );
 
   if (!issues.length) {
@@ -697,18 +699,29 @@ function MoodTab({ theme }: { theme: Theme | null }) {
 
 function ShopTab() {
   const placed = useDesignStore((s) => s.placed);
+  const rooms = useDesignStore((s) => s.rooms);
   const setSelected = useDesignStore((s) => s.setSelected);
+  const [groupBy, setGroupBy] = useState<"status" | "room">("status");
   const rows = buildShoppingList();
+
+  const roomNameForPiece = (label: string): string => {
+    const p = placed.find((x) => x.label === label);
+    if (!p) return "Unassigned";
+    const id = findRoomAt({ x: p.x, y: p.y }, rooms);
+    return rooms.find((r) => r.id === id)?.name ?? "Unassigned";
+  };
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof rows>();
     for (const r of rows) {
-      const list = map.get(r.status || "unassigned") ?? [];
+      const key = groupBy === "status" ? r.status || "unassigned" : roomNameForPiece(r.label);
+      const list = map.get(key) ?? [];
       list.push(r);
-      map.set(r.status || "unassigned", list);
+      map.set(key, list);
     }
     return map;
-  }, [rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, groupBy, rooms, placed]);
 
   const total = rows.reduce((acc, r) => acc + (r.price || (r.priceLow + r.priceHigh) / 2), 0);
   const knownTotal = rows.reduce((acc, r) => acc + (r.price || 0), 0);
@@ -743,29 +756,47 @@ function ShopTab() {
         </div>
       )}
 
-      {(["owned", "ordered", "wishlist", "considering", "unassigned"] as const).map((status) => {
-        const items = grouped.get(status);
-        if (!items?.length) return null;
-        const labels: Record<string, string> = {
+      <div className="seg">
+        {(["status", "room"] as const).map((g) => (
+          <button
+            key={g}
+            onClick={() => setGroupBy(g)}
+            className={`seg-btn flex-1 ${groupBy === g ? "seg-btn-active" : ""}`}
+          >
+            By {g}
+          </button>
+        ))}
+      </div>
+
+      {Array.from(grouped.entries()).map(([key, items]) => {
+        const labelsStatus: Record<string, string> = {
           owned: "Owned",
           ordered: "Ordered",
           wishlist: "Wishlist",
           considering: "Considering",
           unassigned: "Unassigned",
         };
-        const dotColor: Record<string, string> = {
+        const dotColorStatus: Record<string, string> = {
           owned: "bg-sage-500",
           ordered: "bg-sky-600",
           wishlist: "bg-amber-500",
           considering: "bg-ink-400",
           unassigned: "bg-ink-200",
         };
+        const headerLabel = groupBy === "status" ? labelsStatus[key] ?? key : key;
+        const groupTotal = items.reduce((acc, r) => acc + (r.price || (r.priceLow + r.priceHigh) / 2), 0);
         return (
-          <div key={status} className="card overflow-hidden">
+          <div key={key} className="card overflow-hidden">
             <div className="px-3 py-2 bg-paper-100 border-b border-ink-200/70 flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${dotColor[status]}`} />
-              <span className="text-[11px] uppercase tracking-wider font-medium">{labels[status]}</span>
-              <span className="ml-auto text-[10px] font-mono text-ink-500">{items.length}</span>
+              {groupBy === "status" ? (
+                <span className={`w-2 h-2 rounded-full ${dotColorStatus[key] ?? "bg-ink-200"}`} />
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-accent-500" />
+              )}
+              <span className="text-[11px] uppercase tracking-wider font-medium">{headerLabel}</span>
+              <span className="ml-auto text-[10px] font-mono text-ink-500">
+                {items.length} · ~${Math.round(groupTotal).toLocaleString()}
+              </span>
             </div>
             <ul>
               {items.map((r, i) => {

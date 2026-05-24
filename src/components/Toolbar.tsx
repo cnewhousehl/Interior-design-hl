@@ -24,6 +24,8 @@ import {
   Sun,
   Plug,
   Layers as LayersIcon,
+  RectangleHorizontal,
+  Camera,
 } from "lucide-react";
 import type { LayerVisibility } from "@/lib/types";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
@@ -151,6 +153,14 @@ export default function Toolbar() {
           onClick={setToolMode}
           icon={<DoorOpen className="w-3.5 h-3.5" />}
           label="D"
+          disabled={!calibrated}
+        />
+        <ToolBtn
+          mode="draw-window"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<RectangleHorizontal className="w-3.5 h-3.5" />}
+          label="Wn"
           disabled={!calibrated}
         />
         <ToolBtn

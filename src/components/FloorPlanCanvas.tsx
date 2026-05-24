@@ -54,6 +54,8 @@ export default function FloorPlanCanvas() {
   const setPan = useDesignStore((s) => s.setPan);
   const addWall = useDesignStore((s) => s.addWall);
   const addDoor = useDesignStore((s) => s.addDoor);
+  const addWindow = useDesignStore((s) => s.addWindow);
+  const removeWindow = useDesignStore((s) => s.removeWindow);
   const addAnnotation = useDesignStore((s) => s.addAnnotation);
   const addTrafficPath = useDesignStore((s) => s.addTrafficPath);
   const addFixture = useDesignStore((s) => s.addFixture);
@@ -170,6 +172,25 @@ export default function FloorPlanCanvas() {
         swing: "right",
         openDeg: 90,
         label: "Door",
+      });
+      setToolMode("select");
+      return;
+    }
+
+    if (toolMode === "draw-window" && ppf) {
+      const wall = nearestWall(feet, walls, 1.5);
+      if (!wall) {
+        alert("Click closer to a wall — windows must sit on a wall.");
+        return;
+      }
+      const proj = projectOntoWall(feet, wall);
+      const angleDeg = (Math.atan2(wall.b.y - wall.a.y, wall.b.x - wall.a.x) * 180) / Math.PI;
+      addWindow({
+        id: crypto.randomUUID(),
+        position: proj,
+        widthFt: 3,
+        angleDeg,
+        label: "Window",
       });
       setToolMode("select");
       return;
@@ -398,7 +419,7 @@ export default function FloorPlanCanvas() {
               );
             })}
             {layers.windows && windows.map((wn) => (
-              <WindowMark key={wn.id} w={wn} ppf={ppf} zoom={zoom} />
+              <WindowMark key={wn.id} w={wn} ppf={ppf} zoom={zoom} onRemove={() => removeWindow(wn.id)} />
             ))}
             {layers.doors && doors.map((d) => (
               <DoorMark key={d.id} door={d} ppf={ppf} zoom={zoom} />
@@ -990,22 +1011,48 @@ function WindowMark({
   w,
   ppf,
   zoom,
+  onRemove,
 }: {
   w: { position: Point; widthFt: number; angleDeg: number };
   ppf: number;
   zoom: number;
+  onRemove?: () => void;
 }) {
   const r = w.widthFt * ppf;
   const cos = Math.cos((w.angleDeg * Math.PI) / 180);
   const sin = Math.sin((w.angleDeg * Math.PI) / 180);
   const end = { x: w.position.x * ppf + r * cos, y: w.position.y * ppf + r * sin };
+  // Render as a doubled line (glass between frames) with two end caps
+  const perp = { x: -sin, y: cos };
+  const off = 1.5 / zoom;
   return (
-    <Line
-      points={[w.position.x * ppf, w.position.y * ppf, end.x, end.y]}
-      stroke="#7aa6c7"
-      strokeWidth={4 / zoom}
-      lineCap="round"
-    />
+    <Group
+      onClick={(e) => {
+        e.cancelBubble = true;
+        if ((e.evt.shiftKey || e.evt.metaKey) && onRemove) onRemove();
+      }}
+    >
+      <Line
+        points={[w.position.x * ppf, w.position.y * ppf, end.x, end.y]}
+        stroke="#faf6ee"
+        strokeWidth={5 / zoom}
+        lineCap="butt"
+      />
+      <Line
+        points={[w.position.x * ppf + perp.x * off, w.position.y * ppf + perp.y * off, end.x + perp.x * off, end.y + perp.y * off]}
+        stroke="#7aa6c7"
+        strokeWidth={1.5 / zoom}
+        lineCap="butt"
+      />
+      <Line
+        points={[w.position.x * ppf - perp.x * off, w.position.y * ppf - perp.y * off, end.x - perp.x * off, end.y - perp.y * off]}
+        stroke="#7aa6c7"
+        strokeWidth={1.5 / zoom}
+        lineCap="butt"
+      />
+      <Circle x={w.position.x * ppf} y={w.position.y * ppf} radius={2 / zoom} fill="#7aa6c7" />
+      <Circle x={end.x} y={end.y} radius={2 / zoom} fill="#7aa6c7" />
+    </Group>
   );
 }
 

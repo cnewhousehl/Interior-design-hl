@@ -56,6 +56,7 @@ type StoreState = {
   setCalibration: (cal: CalibrationPoints, pixelsPerFoot: number) => void;
 
   addFurniture: (item: PlacedFurniture) => void;
+  addFurnitureBatch: (items: PlacedFurniture[]) => void;
   updateFurniture: (id: string, partial: Partial<PlacedFurniture>) => void;
   removeFurniture: (id: string) => void;
   duplicateFurniture: (id: string) => void;
@@ -177,6 +178,15 @@ const creator: StateCreator<StoreState> = (set, get) => ({
       placed: [...s.placed, item],
       selectedId: item.id,
       selectedIds: [item.id],
+      toolMode: "select",
+      pendingCatalogId: null,
+    })),
+
+  addFurnitureBatch: (items) =>
+    set((s) => ({
+      placed: [...s.placed, ...items],
+      selectedIds: items.map((i) => i.id),
+      selectedId: items[items.length - 1]?.id ?? null,
       toolMode: "select",
       pendingCatalogId: null,
     })),
