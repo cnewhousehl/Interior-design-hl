@@ -11,6 +11,7 @@ import { footprintPolygon, polygonDistance, pxDistance } from "@/lib/geometry";
 import { formatFeet } from "@/lib/format";
 import { computeSunArc } from "@/lib/sunPath";
 import { runValidation } from "@/lib/validation";
+import { STARTER_APARTMENTS, renderStarterToFloorPlan } from "@/lib/starterApartments";
 
 type Size = { width: number; height: number };
 
@@ -391,8 +392,8 @@ export default function FloorPlanCanvas() {
 
   if (!floorPlan) {
     return (
-      <div ref={containerRef} className="h-full w-full grid place-items-center text-ink-500">
-        <div className="text-center max-w-sm px-6">
+      <div ref={containerRef} className="h-full w-full grid place-items-center text-ink-500 overflow-auto">
+        <div className="text-center max-w-3xl px-6 py-10">
           <div className="w-16 h-16 rounded-2xl bg-paper-200 mx-auto mb-4 grid place-items-center shadow-soft">
             <svg className="w-7 h-7 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -400,9 +401,35 @@ export default function FloorPlanCanvas() {
             </svg>
           </div>
           <h2 className="font-display text-xl mb-1 text-ink-800">Start with a floor plan</h2>
-          <p className="text-sm text-ink-500 leading-relaxed">
-            Upload a PNG or JPG floor plan from the top bar, then calibrate the scale by clicking two points on a wall whose length you know.
+          <p className="text-sm text-ink-500 leading-relaxed max-w-md mx-auto">
+            Upload a PNG or JPG floor plan from the top bar — or pick one of these starter templates and start placing furniture right away.
           </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 max-w-3xl">
+            {STARTER_APARTMENTS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  const fp = renderStarterToFloorPlan(s);
+                  const store = useDesignStore.getState();
+                  store.setFloorPlan(fp);
+                  // Inject walls / doors / rooms after the floor plan loads
+                  setTimeout(() => {
+                    const cur = useDesignStore.getState();
+                    cur.setWalls(s.walls.map((w) => ({ ...w, id: crypto.randomUUID() })));
+                    cur.setDoors(s.doors.map((d) => ({ ...d, id: crypto.randomUUID() })));
+                    cur.setRooms(s.rooms.map((r) => ({ ...r, id: crypto.randomUUID() })));
+                  }, 50);
+                }}
+                className="card text-left p-3 hover:bg-paper-100 transition-colors group animate-fade-in"
+              >
+                <div className="font-medium text-sm group-hover:text-accent-500">{s.name}</div>
+                <div className="text-[11px] text-ink-500 mt-0.5 leading-snug">{s.description}</div>
+                <div className="text-[10px] font-mono text-ink-400 mt-1.5">
+                  {s.widthFt}' × {s.depthFt}' · {s.rooms.length} rooms
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );

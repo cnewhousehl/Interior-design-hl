@@ -28,6 +28,7 @@ import { downloadShoppingCsv, buildShoppingList } from "@/lib/shoppingList";
 import { encodeShareUrl } from "@/lib/share";
 import { getApiKey, settings } from "@/lib/settings";
 import { computeWalkability } from "@/lib/walkability";
+import { extractPalette } from "@/lib/colorExtract";
 
 type Tab = "props" | "issues" | "mood" | "shop";
 
@@ -753,6 +754,8 @@ function MoodTab({ theme }: { theme: Theme | null }) {
   const [recs, setRecs] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
   const [recsSource, setRecsSource] = useState<"claude" | "catalog" | null>(null);
+  const [extractedPalette, setExtractedPalette] = useState<{ hex: string; weight: number }[] | null>(null);
+  const [extracting, setExtracting] = useState(false);
 
   const fetchRecs = async () => {
     if (!theme) return;
@@ -795,6 +798,56 @@ function MoodTab({ theme }: { theme: Theme | null }) {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="card p-3 animate-slide-up">
+        <div className="label mb-2 flex items-center gap-1.5">
+          <ImageIcon className="w-3 h-3" /> Palette from photo
+        </div>
+        <label className="btn-outline btn-sm w-full justify-center cursor-pointer">
+          <ImageIcon className="w-3 h-3" /> {extracting ? "Reading…" : "Upload mood photo"}
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              setExtracting(true);
+              try {
+                const reader = new FileReader();
+                const dataUrl: string = await new Promise((res, rej) => {
+                  reader.onload = () => res(String(reader.result));
+                  reader.onerror = rej;
+                  reader.readAsDataURL(f);
+                });
+                const palette = await extractPalette(dataUrl, 6);
+                setExtractedPalette(palette);
+              } finally {
+                setExtracting(false);
+              }
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {extractedPalette && extractedPalette.length > 0 && (
+          <div className="mt-2.5 flex gap-1.5">
+            {extractedPalette.map((s, i) => (
+              <div
+                key={i}
+                className="flex-1 cursor-pointer"
+                title={`${s.hex} — click to copy`}
+                onClick={() => navigator.clipboard?.writeText(s.hex)}
+              >
+                <div className="h-10 rounded-md ring-1 ring-ink-200 hover:ring-accent-500" style={{ background: s.hex }} />
+                <div className="text-[9px] mt-1 text-center truncate text-ink-500 font-mono uppercase">{s.hex}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="text-[10px] text-ink-500 mt-1.5 leading-snug">
+          Drop in any reference photo — interior shot, fabric swatch, art piece — to extract its dominant colors. Click a swatch to copy the hex.
+        </div>
       </div>
 
       {palette && (
