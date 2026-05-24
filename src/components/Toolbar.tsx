@@ -31,6 +31,7 @@ import type { LayerVisibility } from "@/lib/types";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, renameLayout } from "@/lib/persistence";
 import type { SavedLayout, ToolMode } from "@/lib/types";
+import IdentifyFromPhoto from "./IdentifyFromPhoto";
 
 export default function Toolbar() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -108,6 +109,7 @@ export default function Toolbar() {
       <LayoutsMenu />
 
       <AutoDetectButton />
+      <IdentifyFromPhoto />
 
       <div className="divider-v" />
 

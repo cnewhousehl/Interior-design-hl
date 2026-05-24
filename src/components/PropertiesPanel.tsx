@@ -15,6 +15,8 @@ import {
   Sparkles,
   ExternalLink,
   ListTree,
+  Image as ImageIcon,
+  X,
 } from "lucide-react";
 import { useDesignStore } from "@/lib/store";
 import { defaultPrice, getCatalogItem } from "@/lib/catalog";
@@ -320,6 +322,48 @@ function PropertiesTab() {
               Reset
             </button>
           )}
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Photo">
+        <div className="flex items-center gap-2">
+          {selected.imageDataUrl ? (
+            <div className="relative">
+              <img
+                src={selected.imageDataUrl}
+                className="w-16 h-12 object-cover rounded-md ring-1 ring-ink-200"
+                alt={selected.label}
+              />
+              <button
+                onClick={() => updateFurniture(selected.id, { imageDataUrl: undefined })}
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-ink-900 text-paper-50 grid place-items-center hover:bg-red-700"
+                title="Remove photo"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="w-16 h-12 rounded-md border border-dashed border-ink-300 grid place-items-center text-ink-400">
+              <ImageIcon className="w-4 h-4" />
+            </div>
+          )}
+          <label className="btn-outline btn-sm cursor-pointer flex-1 justify-center">
+            <ImageIcon className="w-3 h-3" />
+            {selected.imageDataUrl ? "Replace" : "Upload product photo"}
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const reader = new FileReader();
+                reader.onload = () => updateFurniture(selected.id, { imageDataUrl: String(reader.result) });
+                reader.readAsDataURL(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
         </div>
       </FieldGroup>
 

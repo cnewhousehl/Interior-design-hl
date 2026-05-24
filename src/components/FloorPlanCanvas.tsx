@@ -930,6 +930,8 @@ function FurnitureShape({
         />
       )}
 
+      {item.imageDataUrl && <FurnitureImage url={item.imageDataUrl} width={w} depth={d} catalog={catalog} />}
+
       {catalog.shape !== "circle" && catalog.category !== "rugs" && (
         <Line points={[0, -d / 2, 0, -d / 2 + Math.min(d * 0.2, 14 / zoom)]} stroke="white" strokeWidth={2 / zoom} />
       )}
@@ -949,6 +951,46 @@ function FurnitureShape({
         </Label>
       )}
     </Group>
+  );
+}
+
+function FurnitureImage({
+  url,
+  width,
+  depth,
+  catalog,
+}: {
+  url: string;
+  width: number;
+  depth: number;
+  catalog: CatalogItem;
+}) {
+  const [img] = useImage(url, "anonymous");
+  if (!img) return null;
+  // Compute clip path matching the catalog shape so the image conforms
+  if (catalog.shape === "circle") {
+    return (
+      <KImage
+        image={img}
+        x={-width / 2}
+        y={-depth / 2}
+        width={width}
+        height={depth}
+        opacity={0.95}
+        listening={false}
+      />
+    );
+  }
+  return (
+    <KImage
+      image={img}
+      x={-width / 2}
+      y={-depth / 2}
+      width={width}
+      height={depth}
+      opacity={0.95}
+      listening={false}
+    />
   );
 }
 

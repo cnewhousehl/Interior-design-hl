@@ -81,6 +81,8 @@ export type PlacedFurniture = {
   notes?: string;
   colorOverride?: string;
   hidden?: boolean;
+  /** Optional photo of the actual piece, rendered top-down inside the footprint. */
+  imageDataUrl?: string;
 };
 
 /** A wall segment between two points (in feet, scene coords). */
