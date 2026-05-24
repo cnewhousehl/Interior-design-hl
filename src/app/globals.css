@@ -2,23 +2,136 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#__next {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  background: theme(colors.paper);
-  color: theme(colors.ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+@layer base {
+  html,
+  body,
+  #__next {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: theme(colors.paper.100);
+    color: theme(colors.ink.900);
+    font-family: theme(fontFamily.sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Refined scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: theme(colors.ink.300);
+    border-radius: 8px;
+    border: 2px solid theme(colors.paper.100);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: theme(colors.ink.400);
+  }
+
+  /* Input baseline */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  button:focus-visible {
+    outline: 2px solid theme(colors.accent.500);
+    outline-offset: 1px;
+  }
+
+  /* Heading family */
+  h1, h2, h3 {
+    font-family: theme(fontFamily.display);
+    letter-spacing: -0.01em;
+  }
 }
 
-button {
-  font: inherit;
-}
+@layer components {
+  /* Base button styles */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border text-sm font-medium transition-all duration-150 select-none;
+    @apply disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply btn border-transparent text-ink-700 hover:bg-ink-100;
+  }
+  .btn-outline {
+    @apply btn border-ink-200 bg-paper-50 text-ink-800 hover:bg-paper-200 hover:border-ink-300;
+  }
+  .btn-primary {
+    @apply btn border-ink-900 bg-ink-900 text-paper-50 hover:bg-ink-800;
+  }
+  .btn-accent {
+    @apply btn border-accent-500 bg-accent-500 text-white hover:bg-accent-600;
+  }
+  .btn-sm {
+    @apply h-7 px-2 text-xs;
+  }
+  .btn-md {
+    @apply h-8 px-2.5 text-sm;
+  }
+  .btn-icon {
+    @apply h-8 w-8 p-0 justify-center;
+  }
 
-input,
-select,
-textarea {
-  font: inherit;
+  /* Inputs */
+  .input {
+    @apply w-full rounded-lg border border-ink-200 bg-paper-50 px-2.5 py-1.5 text-sm transition-colors;
+    @apply hover:border-ink-300 focus:border-accent-500 focus:bg-white;
+  }
+  .input-sm {
+    @apply rounded-md px-2 py-1 text-xs;
+  }
+
+  /* Labels */
+  .label {
+    @apply text-[10px] font-medium uppercase tracking-[0.08em] text-ink-500;
+  }
+
+  /* Card */
+  .card {
+    @apply rounded-xl border border-ink-200/70 bg-paper-50 shadow-soft;
+  }
+
+  /* Segmented control */
+  .seg {
+    @apply inline-flex items-center rounded-lg border border-ink-200 bg-paper-50 p-0.5 shadow-soft;
+  }
+  .seg-btn {
+    @apply h-6 px-2 text-xs rounded-md text-ink-600 transition-colors;
+  }
+  .seg-btn-active {
+    @apply bg-ink-900 text-paper-50 shadow-sm;
+  }
+
+  /* Divider */
+  .divider-v {
+    @apply h-5 w-px bg-ink-200/70 mx-1 shrink-0;
+  }
+
+  /* Tab */
+  .tab {
+    @apply flex-1 px-3 py-2.5 text-xs font-medium uppercase tracking-[0.06em] transition-colors;
+  }
+  .tab-active {
+    @apply text-ink-900 border-b-2 border-accent-500;
+  }
+  .tab-idle {
+    @apply text-ink-500 hover:text-ink-700 border-b-2 border-transparent;
+  }
 }

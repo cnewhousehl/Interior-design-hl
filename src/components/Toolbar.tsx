@@ -1,6 +1,30 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  Upload,
+  MousePointer2,
+  Ruler,
+  Square,
+  DoorOpen,
+  Sparkles,
+  Undo2,
+  Redo2,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Trash2,
+  Tag as TagIcon,
+  Grid3x3,
+  Download,
+  ChevronDown,
+  StickyNote,
+  FolderOpen,
+  Move3d,
+  Compass,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, renameLayout } from "@/lib/persistence";
 import type { SavedLayout, ToolMode } from "@/lib/types";
@@ -15,6 +39,7 @@ export default function Toolbar() {
   const showGrid = useDesignStore((s) => s.showGrid);
   const showWalls = useDesignStore((s) => s.showWalls);
   const zoom = useDesignStore((s) => s.zoom);
+  const view = useDesignStore((s) => s.view);
 
   const setFloorPlan = useDesignStore((s) => s.setFloorPlan);
   const setToolMode = useDesignStore((s) => s.setToolMode);
@@ -24,11 +49,12 @@ export default function Toolbar() {
   const toggleWalls = useDesignStore((s) => s.toggleWalls);
   const reset = useDesignStore((s) => s.reset);
   const setZoom = useDesignStore((s) => s.setZoom);
+  const fitToView = useDesignStore((s) => s.fitToView);
+  const setView = useDesignStore((s) => s.setView);
 
-  const { undo, redo, pastStates, futureStates } = useTemporalStore.getState();
   const [, force] = useState(0);
   useEffect(() => useTemporalStore.subscribe(() => force((x) => x + 1)), []);
-
+  const { undo, redo, pastStates, futureStates } = useTemporalStore.getState();
   const canUndo = pastStates.length > 0;
   const canRedo = futureStates.length > 0;
 
@@ -51,9 +77,19 @@ export default function Toolbar() {
     reader.readAsDataURL(file);
   };
 
+  const calibrated = !!floorPlan?.pixelsPerFoot;
+
   return (
-    <div className="h-12 border-b border-ink/10 bg-paper flex items-center px-3 gap-2 overflow-x-auto">
-      <div className="font-semibold text-lg pr-2 shrink-0">Studio</div>
+    <header className="h-14 border-b border-ink-200/70 bg-paper-50/95 backdrop-blur-md flex items-center px-4 gap-1.5 overflow-x-auto shadow-soft">
+      <div className="flex items-center gap-2 pr-3 shrink-0">
+        <div className="w-7 h-7 rounded-lg bg-ink-900 grid place-items-center text-paper-50">
+          <Square className="w-3.5 h-3.5" strokeWidth={2.5} />
+        </div>
+        <div className="flex flex-col leading-none">
+          <span className="font-display text-base font-medium tracking-tight">Plan</span>
+          <span className="text-[9px] uppercase tracking-[0.12em] text-ink-500">Studio</span>
+        </div>
+      </div>
 
       <input
         ref={fileRef}
@@ -66,92 +102,164 @@ export default function Toolbar() {
           e.target.value = "";
         }}
       />
-      <button
-        onClick={() => fileRef.current?.click()}
-        className="px-2.5 py-1.5 text-sm rounded border border-ink/20 hover:bg-ink/5 shrink-0"
-      >
-        Upload
-      </button>
+      <IconBtn icon={<Upload className="w-3.5 h-3.5" />} label="Upload" onClick={() => fileRef.current?.click()} />
 
       <LayoutsMenu />
 
       <AutoDetectButton />
 
-      <div className="h-6 w-px bg-ink/10 mx-0.5 shrink-0" />
+      <div className="divider-v" />
 
-      <div className="flex items-center gap-0.5 shrink-0">
-        <button
-          onClick={() => undo()}
-          disabled={!canUndo}
-          title="Undo (⌘Z)"
-          className="px-2 py-1 text-sm rounded border border-ink/20 hover:bg-ink/5 disabled:opacity-30"
-        >
-          ↶
-        </button>
-        <button
-          onClick={() => redo()}
-          disabled={!canRedo}
-          title="Redo (⌘⇧Z)"
-          className="px-2 py-1 text-sm rounded border border-ink/20 hover:bg-ink/5 disabled:opacity-30"
-        >
-          ↷
-        </button>
-      </div>
-
-      <div className="h-6 w-px bg-ink/10 mx-0.5 shrink-0" />
-
-      {/* Tool mode selector */}
-      <ToolBtn mode="select" current={toolMode} onClick={setToolMode} label="Select" shortcut="V" />
-      <ToolBtn mode="calibrate" current={toolMode} onClick={setToolMode} label="Calibrate" disabled={!floorPlan} />
-      <ToolBtn mode="draw-wall" current={toolMode} onClick={setToolMode} label="Walls" disabled={!floorPlan?.pixelsPerFoot} shortcut="W" />
-      <ToolBtn mode="draw-door" current={toolMode} onClick={setToolMode} label="Door" disabled={!floorPlan?.pixelsPerFoot} shortcut="D" />
-      <ToolBtn mode="measure" current={toolMode} onClick={setToolMode} label="Measure" disabled={!floorPlan?.pixelsPerFoot} shortcut="M" />
-      <ToolBtn mode="note" current={toolMode} onClick={setToolMode} label="Note" disabled={!floorPlan?.pixelsPerFoot} shortcut="N" />
-
-      <div className="h-6 w-px bg-ink/10 mx-0.5 shrink-0" />
-
-      <ToggleBtn active={showDimensions} onClick={toggleDimensions} label="Labels" />
-      <ToggleBtn active={showWalls} onClick={toggleWalls} label="Walls" />
-      <ToggleBtn active={showGrid} onClick={toggleGrid} label="Grid" />
-
-      <div className="h-6 w-px bg-ink/10 mx-0.5 shrink-0" />
-
-      <span className="text-xs text-ink/60 pr-1 shrink-0">Clr:</span>
-      <SegBtn
-        value={clearanceMode}
-        options={[
-          { v: "off", label: "Off" },
-          { v: "selected", label: "Sel" },
-          { v: "all", label: "All" },
-        ]}
-        onChange={(v) => setClearanceMode(v as "off" | "selected" | "all")}
+      <IconBtn
+        icon={<Undo2 className="w-3.5 h-3.5" />}
+        title="Undo (⌘Z)"
+        onClick={() => undo()}
+        disabled={!canUndo}
+        compact
+      />
+      <IconBtn
+        icon={<Redo2 className="w-3.5 h-3.5" />}
+        title="Redo (⌘⇧Z)"
+        onClick={() => redo()}
+        disabled={!canRedo}
+        compact
       />
 
+      <div className="divider-v" />
+
+      {/* Tool group */}
+      <div className="seg">
+        <ToolBtn mode="select" current={toolMode} onClick={setToolMode} icon={<MousePointer2 className="w-3.5 h-3.5" />} label="V" />
+        <ToolBtn
+          mode="calibrate"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<Ruler className="w-3.5 h-3.5" />}
+          label="Cal"
+          disabled={!floorPlan}
+        />
+        <ToolBtn
+          mode="draw-wall"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<Square className="w-3.5 h-3.5" />}
+          label="W"
+          disabled={!calibrated}
+        />
+        <ToolBtn
+          mode="draw-door"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<DoorOpen className="w-3.5 h-3.5" />}
+          label="D"
+          disabled={!calibrated}
+        />
+        <ToolBtn
+          mode="measure"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<Ruler className="w-3.5 h-3.5" />}
+          label="M"
+          disabled={!calibrated}
+        />
+        <ToolBtn
+          mode="traffic"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<Move3d className="w-3.5 h-3.5" />}
+          label="T"
+          disabled={!calibrated}
+        />
+        <ToolBtn
+          mode="note"
+          current={toolMode}
+          onClick={setToolMode}
+          icon={<StickyNote className="w-3.5 h-3.5" />}
+          label="N"
+          disabled={!calibrated}
+        />
+      </div>
+
+      <div className="divider-v" />
+
+      <Toggle active={showDimensions} onClick={toggleDimensions} icon={<TagIcon className="w-3.5 h-3.5" />} label="Labels" />
+      <Toggle active={showWalls} onClick={toggleWalls} icon={<Square className="w-3.5 h-3.5" />} label="Walls" />
+      <Toggle active={showGrid} onClick={toggleGrid} icon={<Grid3x3 className="w-3.5 h-3.5" />} label="Grid" />
+
+      <div className="divider-v" />
+
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="label">Clearance</span>
+        <div className="seg">
+          {(["off", "selected", "all"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setClearanceMode(v)}
+              className={`seg-btn ${clearanceMode === v ? "seg-btn-active" : ""}`}
+            >
+              {v === "selected" ? "Sel" : v[0].toUpperCase() + v.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        <div className="seg">
+          {(["2d", "3d"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`seg-btn flex items-center gap-1 ${view === v ? "seg-btn-active" : ""}`}
+            >
+              {v.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
         <ExportPngButton />
-        <button
-          onClick={() => setZoom(Math.max(0.1, zoom / 1.2))}
-          className="px-2 py-1 text-sm rounded border border-ink/20 hover:bg-ink/5"
-        >
-          −
-        </button>
-        <span className="text-xs tabular-nums w-9 text-center">{Math.round(zoom * 100)}%</span>
-        <button
-          onClick={() => setZoom(Math.min(8, zoom * 1.2))}
-          className="px-2 py-1 text-sm rounded border border-ink/20 hover:bg-ink/5"
-        >
-          +
-        </button>
+        <IconBtn icon={<ZoomOut className="w-3.5 h-3.5" />} onClick={() => setZoom(Math.max(0.1, zoom / 1.2))} compact />
+        <span className="text-[11px] font-mono tabular-nums w-10 text-center text-ink-500">{Math.round(zoom * 100)}%</span>
+        <IconBtn icon={<ZoomIn className="w-3.5 h-3.5" />} onClick={() => setZoom(Math.min(8, zoom * 1.2))} compact />
+        <IconBtn icon={<Maximize2 className="w-3.5 h-3.5" />} onClick={() => fitToView()} title="Fit to view (F)" compact />
         <button
           onClick={() => {
             if (confirm("Clear floor plan and all placed furniture?")) reset();
           }}
-          className="px-2.5 py-1.5 text-sm rounded border border-ink/20 hover:bg-ink/5 ml-1"
+          className="btn-ghost btn-icon"
+          title="Reset"
         >
-          Reset
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
-    </div>
+    </header>
+  );
+}
+
+function IconBtn({
+  icon,
+  label,
+  title,
+  onClick,
+  disabled,
+  compact,
+}: {
+  icon: React.ReactNode;
+  label?: string;
+  title?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      className={`btn-outline btn-md shrink-0 ${compact ? "btn-icon" : ""}`}
+    >
+      {icon}
+      {label && !compact && <span>{label}</span>}
+    </button>
   );
 }
 
@@ -159,66 +267,51 @@ function ToolBtn({
   mode,
   current,
   onClick,
+  icon,
   label,
   disabled,
-  shortcut,
 }: {
   mode: ToolMode;
   current: ToolMode;
   onClick: (m: ToolMode) => void;
+  icon: React.ReactNode;
   label: string;
   disabled?: boolean;
-  shortcut?: string;
 }) {
   const active = current === mode;
   return (
     <button
       onClick={() => onClick(mode)}
       disabled={disabled}
-      title={shortcut ? `${label} (${shortcut})` : label}
-      className={`px-2.5 py-1.5 text-sm rounded border shrink-0 ${
-        active ? "bg-accent text-white border-accent" : "border-ink/20 hover:bg-ink/5"
-      } disabled:opacity-30`}
+      title={mode}
+      className={`seg-btn flex items-center gap-1 ${active ? "seg-btn-active" : ""} disabled:opacity-30`}
     >
-      {label}
+      {icon}
+      <span className="hidden md:inline">{label}</span>
     </button>
   );
 }
 
-function ToggleBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function Toggle({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
   return (
     <button
       onClick={onClick}
-      className={`px-2.5 py-1.5 text-sm rounded border shrink-0 ${
-        active ? "bg-ink text-paper border-ink" : "border-ink/20 hover:bg-ink/5"
-      }`}
+      title={label}
+      className={`btn-md shrink-0 ${active ? "btn-primary" : "btn-outline"}`}
     >
-      {label}
+      {icon}
+      <span className="hidden lg:inline">{label}</span>
     </button>
-  );
-}
-
-function SegBtn({
-  value,
-  options,
-  onChange,
-}: {
-  value: string;
-  options: { v: string; label: string }[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="inline-flex rounded border border-ink/20 overflow-hidden text-sm shrink-0">
-      {options.map((o) => (
-        <button
-          key={o.v}
-          onClick={() => onChange(o.v)}
-          className={`px-2 py-1 ${value === o.v ? "bg-ink text-paper" : "hover:bg-ink/5"}`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -229,58 +322,53 @@ function SegBtn({
 function LayoutsMenu() {
   const [open, setOpen] = useState(false);
   const [layouts, setLayouts] = useState<SavedLayout[]>([]);
-
   const refresh = () => setLayouts(listLayouts());
   useEffect(() => {
     if (open) refresh();
   }, [open]);
 
-  const handleSaveAs = () => {
-    const name = prompt("Name this layout:");
-    if (!name) return;
-    saveCurrentAs(name);
-    refresh();
-  };
-
   return (
     <div className="relative shrink-0">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="px-2.5 py-1.5 text-sm rounded border border-ink/20 hover:bg-ink/5"
-      >
-        Layouts ▾
+      <button onClick={() => setOpen((o) => !o)} className="btn-outline btn-md">
+        <FolderOpen className="w-3.5 h-3.5" />
+        <span>Layouts</span>
+        <ChevronDown className="w-3 h-3" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full mt-1 bg-paper border border-ink/20 rounded shadow-lg z-20 w-72 p-2">
+          <div className="absolute left-0 top-full mt-2 card shadow-float z-20 w-80 p-2 animate-slide-up">
             <button
               onClick={() => {
-                handleSaveAs();
+                const name = prompt("Name this layout:");
+                if (name) {
+                  saveCurrentAs(name);
+                  refresh();
+                }
                 setOpen(false);
               }}
-              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-ink/5"
+              className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-ink-100 flex items-center gap-2"
             >
-              + Save current as…
+              <span className="w-5 h-5 rounded-md bg-accent-500 text-white grid place-items-center text-xs">+</span>
+              <span>Save current as…</span>
             </button>
-            <div className="border-t border-ink/10 my-1" />
+            <div className="border-t border-ink-200/70 my-1" />
             {layouts.length === 0 ? (
-              <div className="px-2 py-2 text-xs text-ink/50">No saved layouts yet.</div>
+              <div className="px-3 py-3 text-xs text-ink-500">No saved layouts yet.</div>
             ) : (
               <ul className="max-h-72 overflow-auto">
                 {layouts.map((l) => (
-                  <li key={l.id} className="text-sm group">
-                    <div className="flex items-center px-2 py-1.5 hover:bg-ink/5 rounded gap-1">
+                  <li key={l.id} className="group">
+                    <div className="flex items-center px-2 py-2 hover:bg-ink-100 rounded-lg gap-1">
                       <button
                         onClick={() => {
                           loadLayout(l.id);
                           setOpen(false);
                         }}
                         className="flex-1 text-left truncate"
-                        title={l.name}
                       >
-                        {l.name}
-                        <div className="text-[10px] text-ink/50">
+                        <div className="font-medium text-sm truncate">{l.name}</div>
+                        <div className="text-[10px] text-ink-500 mt-0.5 font-mono">
                           {new Date(l.updatedAt).toLocaleString()} · {l.placed.length} pieces
                         </div>
                       </button>
@@ -291,10 +379,10 @@ function LayoutsMenu() {
                             refresh();
                           }
                         }}
-                        title="Overwrite with current"
-                        className="opacity-0 group-hover:opacity-100 px-1 text-xs text-ink/60 hover:text-ink"
+                        title="Overwrite"
+                        className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider text-ink-500 hover:text-ink-900 px-1.5"
                       >
-                        save
+                        Save
                       </button>
                       <button
                         onClick={() => {
@@ -305,7 +393,7 @@ function LayoutsMenu() {
                           }
                         }}
                         title="Rename"
-                        className="opacity-0 group-hover:opacity-100 px-1 text-xs text-ink/60 hover:text-ink"
+                        className="opacity-0 group-hover:opacity-100 text-xs text-ink-500 hover:text-ink-900 px-1"
                       >
                         ✎
                       </button>
@@ -317,7 +405,7 @@ function LayoutsMenu() {
                           }
                         }}
                         title="Delete"
-                        className="opacity-0 group-hover:opacity-100 px-1 text-xs text-red-700 hover:text-red-900"
+                        className="opacity-0 group-hover:opacity-100 text-xs text-red-600 hover:text-red-800 px-1"
                       >
                         ✕
                       </button>
@@ -334,7 +422,7 @@ function LayoutsMenu() {
 }
 
 // ---------------------------------------------------------------------------
-// Auto-detect rooms via Claude Vision
+// Auto-detect
 // ---------------------------------------------------------------------------
 
 function AutoDetectButton() {
@@ -342,7 +430,6 @@ function AutoDetectButton() {
   const setRooms = useDesignStore((s) => s.setRooms);
   const setDoors = useDesignStore((s) => s.setDoors);
   const [busy, setBusy] = useState(false);
-
   const ppf = floorPlan?.pixelsPerFoot ?? null;
 
   const run = async () => {
@@ -400,13 +487,9 @@ function AutoDetectButton() {
   };
 
   return (
-    <button
-      onClick={run}
-      disabled={!ppf || busy}
-      title="Use Claude vision to auto-detect rooms and doors"
-      className="px-2.5 py-1.5 text-sm rounded border border-ink/20 hover:bg-ink/5 disabled:opacity-30 shrink-0"
-    >
-      {busy ? "Detecting…" : "✨ Auto-detect"}
+    <button onClick={run} disabled={!ppf || busy} className="btn-outline btn-md shrink-0">
+      <Sparkles className={`w-3.5 h-3.5 ${busy ? "animate-pulse text-accent-500" : "text-accent-500"}`} />
+      <span>{busy ? "Detecting…" : "Auto-detect"}</span>
     </button>
   );
 }
@@ -417,7 +500,7 @@ function AutoDetectButton() {
 
 function ExportPngButton() {
   const floorPlan = useDesignStore((s) => s.floorPlan);
-  const placed = useDesignStore((s) => s.placed);
+
   const handle = () => {
     const stage = (window as unknown as { __designStage?: { toDataURL: (opts: { pixelRatio: number }) => string } })
       .__designStage;
@@ -431,14 +514,10 @@ function ExportPngButton() {
     link.href = dataUrl;
     link.click();
   };
+
   return (
-    <button
-      onClick={handle}
-      disabled={!floorPlan}
-      title={`Export PNG (${placed.length} pieces)`}
-      className="px-2 py-1 text-sm rounded border border-ink/20 hover:bg-ink/5 disabled:opacity-30"
-    >
-      PNG
+    <button onClick={handle} disabled={!floorPlan} className="btn-outline btn-md btn-icon" title="Export PNG">
+      <Download className="w-3.5 h-3.5" />
     </button>
   );
 }

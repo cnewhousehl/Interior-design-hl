@@ -1,6 +1,6 @@
 import { getCatalogItem } from "./catalog";
 import { footprintPolygon, polygonDistance } from "./geometry";
-import type { Door, Issue, PlacedFurniture, Point, Wall } from "./types";
+import type { Door, Issue, PlacedFurniture, Point, TrafficPath, Wall } from "./types";
 
 /**
  * Run all the checks an interior designer cares about:
@@ -14,8 +14,9 @@ export function runValidation(args: {
   placed: PlacedFurniture[];
   walls: Wall[];
   doors: Door[];
+  trafficPaths?: TrafficPath[];
 }): Issue[] {
-  const { placed, walls, doors } = args;
+  const { placed, walls, doors, trafficPaths = [] } = args;
   const out: Issue[] = [];
 
   const polys = placed.map((p) => {
@@ -88,7 +89,48 @@ export function runValidation(args: {
     }
   }
 
+  // traffic paths
+  for (const path of trafficPaths) {
+    if (path.points.length < 2) continue;
+    for (let i = 0; i < path.points.length - 1; i++) {
+      const a = path.points[i];
+      const b = path.points[i + 1];
+      for (const { p, cat, poly } of polys) {
+        if (!poly.length || cat?.category === "rugs") continue;
+        const distFromPath = polygonToSegmentDistance(poly, a, b);
+        if (distFromPath < path.minWidthFt / 2) {
+          out.push({
+            id: `traffic-${p.id}-${path.id}-${i}`,
+            severity: "warn",
+            message: `${p.label} narrows the ${path.label ?? "traffic path"} to under ${path.minWidthFt.toFixed(1)}'.`,
+            furnitureId: p.id,
+          });
+          break;
+        }
+      }
+    }
+  }
+
   return out;
+}
+
+function polygonToSegmentDistance(poly: Point[], a: Point, b: Point): number {
+  let min = Infinity;
+  for (const p of poly) {
+    const d = pointToSegment(p, a, b);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+function pointToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
 /** Reconstruct a coarse swing polygon (triangle fan) for a door, in feet. */

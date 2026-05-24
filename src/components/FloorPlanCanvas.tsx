@@ -6,15 +6,14 @@ import Konva from "konva";
 import useImage from "use-image";
 import { getCatalogItem } from "@/lib/catalog";
 import { useDesignStore } from "@/lib/store";
-import type { CatalogItem, Door, PlacedFurniture, Point, Wall } from "@/lib/types";
+import type { CatalogItem, Door, PlacedFurniture, Point, Wall, TrafficPath } from "@/lib/types";
 import { footprintPolygon, polygonDistance, pxDistance } from "@/lib/geometry";
 import { formatFeet } from "@/lib/format";
-import { doorSwingPolygon } from "@/lib/validation";
 
 type Size = { width: number; height: number };
 
-const SNAP_DEG_STEP = 5;
 const ALIGN_THRESHOLD_FT = 0.25;
+const WALL_SNAP_FT = 0.5;
 
 export default function FloorPlanCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -28,6 +27,7 @@ export default function FloorPlanCanvas() {
   const windows = useDesignStore((s) => s.windows);
   const rooms = useDesignStore((s) => s.rooms);
   const annotations = useDesignStore((s) => s.annotations);
+  const trafficPaths = useDesignStore((s) => s.trafficPaths);
   const selectedId = useDesignStore((s) => s.selectedId);
   const selectedIds = useDesignStore((s) => s.selectedIds);
   const toolMode = useDesignStore((s) => s.toolMode);
@@ -39,6 +39,7 @@ export default function FloorPlanCanvas() {
   const zoom = useDesignStore((s) => s.zoom);
   const pan = useDesignStore((s) => s.pan);
   const northDeg = useDesignStore((s) => s.northDeg);
+  const fitRequest = useDesignStore((s) => s.fitRequest);
 
   const setCalibration = useDesignStore((s) => s.setCalibration);
   const addFurniture = useDesignStore((s) => s.addFurniture);
@@ -50,6 +51,7 @@ export default function FloorPlanCanvas() {
   const addWall = useDesignStore((s) => s.addWall);
   const addDoor = useDesignStore((s) => s.addDoor);
   const addAnnotation = useDesignStore((s) => s.addAnnotation);
+  const addTrafficPath = useDesignStore((s) => s.addTrafficPath);
   const setToolMode = useDesignStore((s) => s.setToolMode);
 
   const [calibPoints, setCalibPoints] = useState<Point[]>([]);
@@ -57,6 +59,7 @@ export default function FloorPlanCanvas() {
   const [distanceValue, setDistanceValue] = useState("");
   const [wallStart, setWallStart] = useState<Point | null>(null);
   const [measureStart, setMeasureStart] = useState<Point | null>(null);
+  const [trafficPoints, setTrafficPoints] = useState<Point[]>([]);
   const [cursor, setCursor] = useState<Point | null>(null);
   const [alignLines, setAlignLines] = useState<{ vertical?: number; horizontal?: number }>({});
 
@@ -71,7 +74,6 @@ export default function FloorPlanCanvas() {
     return () => ro.disconnect();
   }, []);
 
-  // Expose stage on window so the toolbar's PNG export can reach it
   useEffect(() => {
     (window as unknown as { __designStage?: Konva.Stage | null }).__designStage = stageRef.current;
     return () => {
@@ -80,11 +82,8 @@ export default function FloorPlanCanvas() {
   });
 
   const ppf = floorPlan?.pixelsPerFoot ?? null;
-
-  // ---------- coord conversion ----------
   const imagePxToFeet = (px: number) => (ppf ? px / ppf : px);
 
-  /** Translate a Konva stage event into image-pixel coordinates and feet. */
   const eventToScene = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     const stage = e.target.getStage();
     if (!stage) return null;
@@ -120,13 +119,15 @@ export default function FloorPlanCanvas() {
     if (toolMode === "place" && pendingCatalogId && ppf) {
       const cat = getCatalogItem(pendingCatalogId);
       if (!cat) return;
+      // Snap-to-wall if dropping near a wall
+      const snapped = snapToNearestWall(feet, cat, 0, walls);
       addFurniture({
         id: crypto.randomUUID(),
         catalogId: cat.id,
         label: cat.name,
-        x: feet.x,
-        y: feet.y,
-        rotation: 0,
+        x: snapped.x,
+        y: snapped.y,
+        rotation: snapped.rotation,
       });
       return;
     }
@@ -142,7 +143,6 @@ export default function FloorPlanCanvas() {
           b: snapped,
           thicknessFt: 0.4,
         });
-        // chain — next click continues from the endpoint
         setWallStart(snapped);
       }
       return;
@@ -173,31 +173,42 @@ export default function FloorPlanCanvas() {
       if (!measureStart) {
         setMeasureStart(feet);
       } else {
-        addAnnotation({
-          id: crypto.randomUUID(),
-          type: "measure",
-          a: measureStart,
-          b: feet,
-        });
+        addAnnotation({ id: crypto.randomUUID(), type: "measure", a: measureStart, b: feet });
         setMeasureStart(null);
         setToolMode("select");
       }
       return;
     }
 
+    if (toolMode === "traffic" && ppf) {
+      // Double-click finishes; single click adds point
+      setTrafficPoints((prev) => [...prev, feet]);
+      return;
+    }
+
     if (toolMode === "note" && ppf) {
       const text = prompt("Note text:");
-      if (text) {
-        addAnnotation({ id: crypto.randomUUID(), type: "note", position: feet, text });
-      }
+      if (text) addAnnotation({ id: crypto.randomUUID(), type: "note", position: feet, text });
       setToolMode("select");
       return;
     }
 
-    // deselect on empty click
     const stage = e.target.getStage();
     if (e.target === stage || e.target.name() === "floor-image" || e.target.name() === "room-fill") {
       setSelected(null);
+    }
+  };
+
+  const handleStageDblClick = () => {
+    if (toolMode === "traffic" && trafficPoints.length >= 2) {
+      addTrafficPath({
+        id: crypto.randomUUID(),
+        points: trafficPoints,
+        minWidthFt: 3,
+        label: "Traffic path",
+      });
+      setTrafficPoints([]);
+      setToolMode("select");
     }
   };
 
@@ -233,27 +244,37 @@ export default function FloorPlanCanvas() {
     setDistanceValue("");
   };
 
-  // Fit image when loaded
-  useEffect(() => {
+  // Fit image to viewport on initial load + fit requests
+  const fitToView = () => {
     if (!image || !size.width || !size.height) return;
     const padding = 40;
     const sx = (size.width - padding * 2) / image.width;
     const sy = (size.height - padding * 2) / image.height;
-    const initial = Math.min(sx, sy, 1);
-    setZoom(initial);
+    const z = Math.min(sx, sy, 1);
+    setZoom(z);
     setPan({
-      x: (size.width - image.width * initial) / 2,
-      y: (size.height - image.height * initial) / 2,
+      x: (size.width - image.width * z) / 2,
+      y: (size.height - image.height * z) / 2,
     });
+  };
+
+  useEffect(() => {
+    if (!image) return;
+    fitToView();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [image, size.width, size.height]);
 
-  // ESC clears the drawing in-progress
+  useEffect(() => {
+    if (fitRequest > 0) fitToView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitRequest]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setWallStart(null);
         setMeasureStart(null);
+        setTrafficPoints([]);
       }
     };
     window.addEventListener("keydown", handler);
@@ -262,17 +283,25 @@ export default function FloorPlanCanvas() {
 
   if (!floorPlan) {
     return (
-      <div ref={containerRef} className="h-full w-full grid place-items-center text-ink/50">
-        <div className="text-center">
-          <div className="text-lg font-medium">No floor plan loaded</div>
-          <div className="text-sm mt-1">Upload an image or load a layout from the top bar.</div>
+      <div ref={containerRef} className="h-full w-full grid place-items-center text-ink-500">
+        <div className="text-center max-w-sm px-6">
+          <div className="w-16 h-16 rounded-2xl bg-paper-200 mx-auto mb-4 grid place-items-center shadow-soft">
+            <svg className="w-7 h-7 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 9h18M9 3v18" />
+            </svg>
+          </div>
+          <h2 className="font-display text-xl mb-1 text-ink-800">Start with a floor plan</h2>
+          <p className="text-sm text-ink-500 leading-relaxed">
+            Upload a PNG or JPG floor plan from the top bar, then calibrate the scale by clicking two points on a wall whose length you know.
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className="h-full w-full relative bg-paper">
+    <div ref={containerRef} className="h-full w-full relative bg-paper-200/30">
       <Stage
         ref={stageRef}
         width={size.width}
@@ -285,16 +314,16 @@ export default function FloorPlanCanvas() {
         onDragMove={onDragStage}
         onClick={handleStageClick}
         onTap={handleStageClick}
+        onDblClick={handleStageDblClick}
         onMouseMove={handleStageMouseMove}
         onWheel={handleWheel}
         style={{ cursor: cursorFor(toolMode) }}
       >
         <Layer>
-          {image && <KImage image={image} name="floor-image" listening opacity={ppf ? 1 : 0.85} />}
+          {image && <KImage image={image} name="floor-image" listening opacity={ppf ? 0.95 : 0.75} />}
           {showGrid && ppf && image && <GridLayer width={image.width} height={image.height} ppf={ppf} />}
         </Layer>
 
-        {/* Rooms */}
         {ppf && rooms.length > 0 && (
           <Layer>
             {rooms.map((r) => {
@@ -307,17 +336,18 @@ export default function FloorPlanCanvas() {
                     points={pts}
                     closed
                     name="room-fill"
-                    fill={r.color ?? "rgba(120, 160, 200, 0.07)"}
-                    stroke="rgba(0,0,0,0.15)"
+                    fill={r.color ?? "rgba(180, 83, 9, 0.05)"}
+                    stroke="rgba(28, 25, 23, 0.15)"
                     strokeWidth={0.5 / zoom}
+                    dash={[8 / zoom, 4 / zoom]}
                   />
                   <Label x={cx * ppf} y={cy * ppf}>
-                    <Tag fill="rgba(255,255,255,0.7)" cornerRadius={3} />
+                    <Tag fill="rgba(250, 246, 238, 0.92)" stroke="rgba(28,25,23,0.15)" strokeWidth={1 / zoom} cornerRadius={4} />
                     <Text
                       text={r.name}
-                      fontSize={12 / zoom}
-                      fill="#333"
-                      padding={3 / zoom}
+                      fontSize={11 / zoom}
+                      fill="#44403c"
+                      padding={4 / zoom}
                       fontStyle="600"
                     />
                   </Label>
@@ -327,18 +357,30 @@ export default function FloorPlanCanvas() {
           </Layer>
         )}
 
-        {/* Walls + doors + windows */}
         {ppf && showWalls && (
           <Layer>
-            {walls.map((w) => (
-              <Line
-                key={w.id}
-                points={[w.a.x * ppf, w.a.y * ppf, w.b.x * ppf, w.b.y * ppf]}
-                stroke="#2b2b2b"
-                strokeWidth={Math.max(3, (w.thicknessFt ?? 0.4) * ppf) / zoom * zoom}
-                lineCap="round"
-              />
-            ))}
+            {walls.map((w) => {
+              const len = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
+              const mx = ((w.a.x + w.b.x) / 2) * ppf;
+              const my = ((w.a.y + w.b.y) / 2) * ppf;
+              return (
+                <Group key={w.id}>
+                  <Line
+                    points={[w.a.x * ppf, w.a.y * ppf, w.b.x * ppf, w.b.y * ppf]}
+                    stroke="#1c1917"
+                    strokeWidth={Math.max(3, (w.thicknessFt ?? 0.4) * ppf)}
+                    lineCap="round"
+                    listening={false}
+                  />
+                  {showDimensions && len > 1 && (
+                    <Label x={mx} y={my} opacity={0.85}>
+                      <Tag fill="rgba(250, 246, 238, 0.9)" cornerRadius={2} />
+                      <Text text={formatFeet(len)} fontSize={9 / zoom} fill="#1c1917" padding={2 / zoom} />
+                    </Label>
+                  )}
+                </Group>
+              );
+            })}
             {windows.map((wn) => (
               <WindowMark key={wn.id} w={wn} ppf={ppf} zoom={zoom} />
             ))}
@@ -346,35 +388,60 @@ export default function FloorPlanCanvas() {
               <DoorMark key={d.id} door={d} ppf={ppf} zoom={zoom} />
             ))}
 
-            {/* in-progress wall */}
             {toolMode === "draw-wall" && wallStart && cursor && (
-              <Line
-                points={[
-                  wallStart.x * ppf,
-                  wallStart.y * ppf,
-                  snapOrtho(wallStart, cursor).x * ppf,
-                  snapOrtho(wallStart, cursor).y * ppf,
-                ]}
-                stroke="#c2410c"
-                strokeWidth={3 / zoom}
-                dash={[8 / zoom, 4 / zoom]}
-              />
+              <Group listening={false}>
+                <Line
+                  points={[
+                    wallStart.x * ppf,
+                    wallStart.y * ppf,
+                    snapOrtho(wallStart, cursor).x * ppf,
+                    snapOrtho(wallStart, cursor).y * ppf,
+                  ]}
+                  stroke="#b45309"
+                  strokeWidth={3 / zoom}
+                  dash={[8 / zoom, 4 / zoom]}
+                />
+                <Circle x={wallStart.x * ppf} y={wallStart.y * ppf} radius={4 / zoom} fill="#b45309" />
+              </Group>
             )}
           </Layer>
         )}
 
-        {/* Calibration overlay */}
         <Layer listening={false}>
           {toolMode === "calibrate" &&
             calibPoints.map((p, i) => (
-              <Circle key={i} x={p.x} y={p.y} radius={5 / zoom} fill="#c2410c" stroke="white" strokeWidth={1 / zoom} />
+              <Circle key={i} x={p.x} y={p.y} radius={6 / zoom} fill="#b45309" stroke="white" strokeWidth={2 / zoom} />
             ))}
         </Layer>
 
-        {/* Furniture */}
+        {/* Traffic paths */}
         {ppf && (
           <Layer>
-            {placed.map((item) => (
+            {trafficPaths.map((p) => (
+              <TrafficPathRender key={p.id} path={p} ppf={ppf} zoom={zoom} />
+            ))}
+            {toolMode === "traffic" && trafficPoints.length > 0 && (
+              <Group listening={false}>
+                <Line
+                  points={[
+                    ...trafficPoints.flatMap((p) => [p.x * ppf, p.y * ppf]),
+                    ...(cursor ? [cursor.x * ppf, cursor.y * ppf] : []),
+                  ]}
+                  stroke="#0ea5e9"
+                  strokeWidth={3 / zoom}
+                  dash={[10 / zoom, 6 / zoom]}
+                />
+                {trafficPoints.map((p, i) => (
+                  <Circle key={i} x={p.x * ppf} y={p.y * ppf} radius={5 / zoom} fill="#0ea5e9" stroke="white" strokeWidth={2 / zoom} />
+                ))}
+              </Group>
+            )}
+          </Layer>
+        )}
+
+        {ppf && (
+          <Layer>
+            {placed.filter((p) => !p.hidden).map((item) => (
               <FurnitureShape
                 key={item.id}
                 item={item}
@@ -383,6 +450,7 @@ export default function FloorPlanCanvas() {
                 zoom={zoom}
                 selected={selectedIds.includes(item.id) || item.id === selectedId}
                 showDimensions={showDimensions}
+                walls={walls}
                 allItems={placed}
                 onAlignLines={setAlignLines}
                 onSelect={(additive) => {
@@ -392,29 +460,29 @@ export default function FloorPlanCanvas() {
                 onChange={(partial) => updateFurniture(item.id, partial)}
               />
             ))}
-            {/* alignment guides */}
             {alignLines.vertical !== undefined && image && (
               <Line
                 points={[alignLines.vertical * ppf, 0, alignLines.vertical * ppf, image.height]}
-                stroke="#a855f7"
+                stroke="#b45309"
                 strokeWidth={1 / zoom}
                 dash={[6 / zoom, 4 / zoom]}
                 listening={false}
+                opacity={0.6}
               />
             )}
             {alignLines.horizontal !== undefined && image && (
               <Line
                 points={[0, alignLines.horizontal * ppf, image.width, alignLines.horizontal * ppf]}
-                stroke="#a855f7"
+                stroke="#b45309"
                 strokeWidth={1 / zoom}
                 dash={[6 / zoom, 4 / zoom]}
                 listening={false}
+                opacity={0.6}
               />
             )}
           </Layer>
         )}
 
-        {/* Annotations: measurements + notes */}
         {ppf && (
           <Layer>
             {annotations.map((a) => {
@@ -435,20 +503,19 @@ export default function FloorPlanCanvas() {
                     <Circle x={a.b.x * ppf} y={a.b.y * ppf} radius={3 / zoom} fill="#0ea5e9" />
                     <Label x={mx} y={my}>
                       <Tag fill="white" stroke="#0ea5e9" strokeWidth={1 / zoom} cornerRadius={3} />
-                      <Text text={formatFeet(dist)} fontSize={12 / zoom} fill="#0ea5e9" padding={3 / zoom} />
+                      <Text text={formatFeet(dist)} fontSize={11 / zoom} fill="#0369a1" padding={3 / zoom} fontStyle="600" />
                     </Label>
                   </Group>
                 );
               }
               return (
                 <Label key={a.id} x={a.position.x * ppf} y={a.position.y * ppf}>
-                  <Tag fill="#fef9c3" stroke="#a16207" strokeWidth={1 / zoom} cornerRadius={3} />
-                  <Text text={a.text} fontSize={11 / zoom} fill="#713f12" padding={3 / zoom} />
+                  <Tag fill="#fef3c7" stroke="#92400e" strokeWidth={1 / zoom} cornerRadius={4} />
+                  <Text text={a.text} fontSize={11 / zoom} fill="#78350f" padding={4 / zoom} />
                 </Label>
               );
             })}
 
-            {/* in-progress measure */}
             {toolMode === "measure" && measureStart && cursor && (
               <Line
                 points={[measureStart.x * ppf, measureStart.y * ppf, cursor.x * ppf, cursor.y * ppf]}
@@ -461,14 +528,12 @@ export default function FloorPlanCanvas() {
           </Layer>
         )}
 
-        {/* Clearance overlay */}
         {ppf && clearanceMode !== "off" && (
           <Layer listening={false}>
-            <ClearanceOverlay ppf={ppf} zoom={zoom} mode={clearanceMode} />
+            <ClearanceOverlay ppf={ppf} zoom={zoom} mode={clearanceMode} walls={walls} />
           </Layer>
         )}
 
-        {/* North arrow */}
         {ppf && (
           <Layer listening={false}>
             <NorthArrow zoom={zoom} pan={pan} stageSize={size} northDeg={northDeg} />
@@ -476,68 +541,81 @@ export default function FloorPlanCanvas() {
         )}
       </Stage>
 
-      {distancePrompt && (
-        <div className="absolute inset-0 grid place-items-center bg-black/30">
-          <div className="bg-paper border border-ink/20 rounded-lg p-5 shadow-xl w-[340px]">
-            <h3 className="font-medium mb-2">How long is that segment?</h3>
-            <p className="text-sm text-ink/70 mb-3">Enter the real-world distance between the two points you clicked.</p>
-            <input
-              autoFocus
-              value={distanceValue}
-              onChange={(e) => setDistanceValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCalibrationSubmit();
-                if (e.key === "Escape") {
-                  setDistancePrompt(null);
-                  setDistanceValue("");
-                }
-              }}
-              placeholder={`e.g. 11, 11.58, or 11'7"`}
-              className="w-full border border-ink/30 rounded px-2 py-1.5 mb-3"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setDistancePrompt(null);
-                  setDistanceValue("");
-                }}
-                className="px-3 py-1.5 rounded border border-ink/20 hover:bg-ink/5"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCalibrationSubmit}
-                className="px-3 py-1.5 rounded bg-accent text-white hover:opacity-90"
-              >
-                Set scale
-              </button>
-            </div>
-          </div>
+      {distancePrompt && <CalibrationModal onSubmit={handleCalibrationSubmit} value={distanceValue} setValue={setDistanceValue} onCancel={() => { setDistancePrompt(null); setDistanceValue(""); }} />}
+
+      {ppf && cursor && (
+        <div className="absolute bottom-3 left-3 bg-ink-900/90 backdrop-blur text-paper-50 text-xs px-3 py-1.5 rounded-lg font-mono shadow-float pointer-events-none">
+          {cursor.x.toFixed(1)}' × {cursor.y.toFixed(1)}'
         </div>
       )}
 
-      {/* Status bar — cursor coords in feet */}
-      {ppf && cursor && (
-        <div className="absolute bottom-3 left-3 bg-ink text-paper text-xs px-2.5 py-1 rounded font-mono pointer-events-none">
-          {cursor.x.toFixed(1)}', {cursor.y.toFixed(1)}'
+      {ppf && (
+        <div className="absolute bottom-3 right-3 bg-ink-900/90 backdrop-blur text-paper-50 text-[10px] px-2.5 py-1 rounded-lg font-mono shadow-float pointer-events-none uppercase tracking-wider">
+          1 ft = {ppf.toFixed(1)} px
         </div>
       )}
 
       {!ppf && (
-        <div className="absolute left-4 bottom-4 bg-ink text-paper text-sm rounded-lg px-3 py-2 max-w-sm shadow">
-          <span className="font-medium">Calibrate scale:</span> click "Calibrate" in the toolbar, then click two points on a wall whose length you know.
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-6 bg-ink-900 text-paper-50 text-sm rounded-xl px-4 py-2.5 max-w-md shadow-float flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />
+          <span className="font-medium">Calibrate scale:</span>
+          <span className="text-paper-100/80">click "Calibrate" then click two points on a known wall.</span>
+        </div>
+      )}
+
+      {toolMode === "traffic" && trafficPoints.length > 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-4 bg-ink-900 text-paper-50 text-xs rounded-lg px-3 py-1.5 shadow-float">
+          Click to add points · Double-click to finish · Esc to cancel
         </div>
       )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function CalibrationModal({
+  onSubmit,
+  onCancel,
+  value,
+  setValue,
+}: {
+  onSubmit: () => void;
+  onCancel: () => void;
+  value: string;
+  setValue: (v: string) => void;
+}) {
+  return (
+    <div className="absolute inset-0 grid place-items-center bg-ink-900/40 backdrop-blur-sm animate-fade-in z-30">
+      <div className="card shadow-float p-6 w-[360px] animate-slide-up">
+        <h3 className="font-display text-lg mb-1.5">Calibrate scale</h3>
+        <p className="text-sm text-ink-500 mb-4 leading-relaxed">
+          What's the real-world distance between the two points you clicked?
+        </p>
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSubmit();
+            if (e.key === "Escape") onCancel();
+          }}
+          placeholder={`11   ·   11.58   ·   11'7"`}
+          className="input font-mono"
+        />
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="btn-outline btn-md">
+            Cancel
+          </button>
+          <button onClick={onSubmit} className="btn-accent btn-md">
+            Set scale
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function cursorFor(mode: string): string {
-  if (mode === "calibrate" || mode === "draw-wall" || mode === "measure") return "crosshair";
+  if (mode === "calibrate" || mode === "draw-wall" || mode === "measure" || mode === "traffic") return "crosshair";
   if (mode === "place" || mode === "draw-door" || mode === "note") return "copy";
   return "default";
 }
@@ -551,7 +629,6 @@ function parseFeetInput(input: string): number | null {
   return isFinite(n) ? n : null;
 }
 
-/** Snap second point to horizontal or vertical from start if close to ortho. */
 function snapOrtho(a: Point, b: Point): Point {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -593,8 +670,39 @@ function pointToSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+/**
+ * Snap a piece's center against the nearest wall: if a wall is within WALL_SNAP_FT
+ * of the requested center, push the piece so its back edge sits flush on the wall.
+ * Returns the snapped center plus the rotation that orients the piece's back to the wall.
+ */
+function snapToNearestWall(
+  center: Point,
+  cat: CatalogItem,
+  curRotation: number,
+  walls: Wall[],
+): { x: number; y: number; rotation: number } {
+  const wall = nearestWall(center, walls, WALL_SNAP_FT * 6);
+  if (!wall) return { x: center.x, y: center.y, rotation: curRotation };
+  const proj = projectOntoWall(center, wall);
+  const dist = Math.hypot(center.x - proj.x, center.y - proj.y);
+  if (dist > WALL_SNAP_FT * 6) return { x: center.x, y: center.y, rotation: curRotation };
+  const wallAngle = Math.atan2(wall.b.y - wall.a.y, wall.b.x - wall.a.x);
+  // Normal pointing from wall toward center
+  const nx = center.x - proj.x;
+  const ny = center.y - proj.y;
+  const nLen = Math.hypot(nx, ny) || 1;
+  const nux = nx / nLen;
+  const nuy = ny / nLen;
+  const depth = cat.depth / 2;
+  return {
+    x: proj.x + nux * depth,
+    y: proj.y + nuy * depth,
+    rotation: ((wallAngle * 180) / Math.PI + 90) % 360,
+  };
+}
+
 // ---------------------------------------------------------------------------
-// Furniture rendering with alignment guides + rotation snap
+// Furniture
 // ---------------------------------------------------------------------------
 
 function FurnitureShape({
@@ -604,6 +712,7 @@ function FurnitureShape({
   zoom,
   selected,
   showDimensions,
+  walls,
   allItems,
   onAlignLines,
   onSelect,
@@ -615,6 +724,7 @@ function FurnitureShape({
   zoom: number;
   selected: boolean;
   showDimensions: boolean;
+  walls: Wall[];
   allItems: PlacedFurniture[];
   onAlignLines: (lines: { vertical?: number; horizontal?: number }) => void;
   onSelect: (additive: boolean) => void;
@@ -624,11 +734,12 @@ function FurnitureShape({
   const w = (item.widthOverride ?? catalog.width) * ppf;
   const d = (item.depthOverride ?? catalog.depth) * ppf;
   const statusColor =
-    item.status === "owned" ? "#0e7c4d"
+    item.status === "owned" ? "#5d7a5a"
     : item.status === "ordered" ? "#0369a1"
-    : item.status === "wishlist" ? "#a16207"
+    : item.status === "wishlist" ? "#b45309"
+    : item.status === "considering" ? "#78716c"
     : null;
-  const stroke = selected ? "#c2410c" : statusColor ?? "#1a1a1a";
+  const stroke = selected ? "#b45309" : statusColor ?? "#1c1917";
   const strokeWidth = (selected ? 2.5 : 1.25) / zoom;
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -637,9 +748,8 @@ function FurnitureShape({
     let y = node.y() / ppf;
     let alignV: number | undefined;
     let alignH: number | undefined;
-    // Try to align center with any other piece's center
     for (const other of allItems) {
-      if (other.id === item.id) continue;
+      if (other.id === item.id || other.hidden) continue;
       if (Math.abs(other.x - x) < ALIGN_THRESHOLD_FT) {
         x = other.x;
         alignV = other.x;
@@ -656,13 +766,27 @@ function FurnitureShape({
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const node = e.target;
-    onChange({ x: node.x() / ppf, y: node.y() / ppf });
+    let x = node.x() / ppf;
+    let y = node.y() / ppf;
+    // Try wall snap at release time
+    if (walls.length && catalog.category !== "rugs") {
+      const snap = snapToNearestWall({ x, y }, catalog, item.rotation, walls);
+      const dist = Math.hypot(snap.x - x, snap.y - y);
+      if (dist < WALL_SNAP_FT) {
+        x = snap.x;
+        y = snap.y;
+        onChange({ x, y, rotation: snap.rotation });
+        onAlignLines({});
+        return;
+      }
+    }
+    onChange({ x, y });
     onAlignLines({});
   };
 
   const handleDblClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     e.cancelBubble = true;
-    const step = e.evt.shiftKey ? SNAP_DEG_STEP : 90;
+    const step = e.evt.shiftKey ? 5 : 90;
     onChange({ rotation: (item.rotation + step) % 360 });
   };
 
@@ -682,13 +806,29 @@ function FurnitureShape({
       onDragEnd={handleDragEnd}
       onDblClick={handleDblClick}
     >
+      {selected && (
+        <Rect
+          x={-w / 2 - 4 / zoom}
+          y={-d / 2 - 4 / zoom}
+          width={w + 8 / zoom}
+          height={d + 8 / zoom}
+          stroke="#b45309"
+          strokeWidth={1 / zoom}
+          dash={[3 / zoom, 3 / zoom]}
+          fill="rgba(180, 83, 9, 0.04)"
+          cornerRadius={2 / zoom}
+        />
+      )}
       {catalog.shape === "circle" ? (
         <Circle
           radius={w / 2}
           fill={item.colorOverride ?? catalog.color}
           stroke={stroke}
           strokeWidth={strokeWidth}
-          opacity={catalog.category === "rugs" ? 0.55 : 0.9}
+          opacity={catalog.category === "rugs" ? 0.5 : 0.92}
+          shadowColor="rgba(0,0,0,0.25)"
+          shadowBlur={selected ? 8 / zoom : 0}
+          shadowOpacity={selected ? 0.4 : 0}
         />
       ) : catalog.shape === "l-shape" && catalog.lShape ? (
         <LShape
@@ -709,25 +849,26 @@ function FurnitureShape({
           fill={item.colorOverride ?? catalog.color}
           stroke={stroke}
           strokeWidth={strokeWidth}
-          cornerRadius={Math.min(w, d) * 0.04}
-          opacity={catalog.category === "rugs" ? 0.55 : 0.9}
+          cornerRadius={Math.min(w, d) * 0.06}
+          opacity={catalog.category === "rugs" ? 0.5 : 0.92}
         />
       )}
 
       {catalog.shape !== "circle" && catalog.category !== "rugs" && (
-        <Line points={[0, -d / 2, 0, -d / 2 + Math.min(d * 0.18, 14)]} stroke="white" strokeWidth={2 / zoom} />
+        <Line points={[0, -d / 2, 0, -d / 2 + Math.min(d * 0.2, 14 / zoom)]} stroke="white" strokeWidth={2 / zoom} />
       )}
 
       {showDimensions && (
         <Label x={0} y={0}>
-          <Tag fill="rgba(26,26,26,0.78)" cornerRadius={3} />
+          <Tag fill="rgba(28, 25, 23, 0.85)" cornerRadius={3} />
           <Text
             text={`${item.label}\n${formatFeet(item.widthOverride ?? catalog.width)} × ${formatFeet(item.depthOverride ?? catalog.depth)}`}
-            fontSize={11 / zoom}
-            fill="#fafaf7"
+            fontSize={10 / zoom}
+            fill="#fafaf9"
             padding={4 / zoom}
             align="center"
             rotation={-item.rotation}
+            lineHeight={1.2}
           />
         </Label>
       )}
@@ -755,15 +896,13 @@ function LShape({
   const w = width / 2;
   const d = depth / 2;
   const pts = [-w, -d, w - notchWidth, -d, w - notchWidth, -d + notchDepth, w, -d + notchDepth, w, d, -w, d];
-  return <Line points={pts} closed fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={0.9} />;
+  return <Line points={pts} closed fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={0.92} />;
 }
 
 function DoorMark({ door, ppf, zoom }: { door: Door; ppf: number; zoom: number }) {
   const r = door.widthFt * ppf;
   const open = door.openDeg ?? 90;
   const angleOffset = door.swing === "left" ? 0 : -open;
-  // Door leaf line
-  const leafEndDeg = door.swing === "left" ? door.angleDeg + 0 : door.angleDeg - 0;
   const leafEnd = {
     x: door.position.x * ppf + r * Math.cos(((door.angleDeg + (door.swing === "left" ? 0 : -open)) * Math.PI) / 180),
     y: door.position.y * ppf + r * Math.sin(((door.angleDeg + (door.swing === "left" ? 0 : -open)) * Math.PI) / 180),
@@ -777,18 +916,17 @@ function DoorMark({ door, ppf, zoom }: { door: Door; ppf: number; zoom: number }
         outerRadius={r}
         angle={open}
         rotation={door.angleDeg + angleOffset}
-        stroke="#7a6147"
+        stroke="#92400e"
         strokeWidth={1 / zoom}
         dash={[4 / zoom, 3 / zoom]}
-        opacity={0.7}
+        opacity={0.6}
       />
       <Line
         points={[door.position.x * ppf, door.position.y * ppf, leafEnd.x, leafEnd.y]}
-        stroke="#7a6147"
+        stroke="#92400e"
         strokeWidth={2 / zoom}
       />
-      <Circle x={door.position.x * ppf} y={door.position.y * ppf} radius={3 / zoom} fill="#7a6147" />
-      {void leafEndDeg}
+      <Circle x={door.position.x * ppf} y={door.position.y * ppf} radius={3 / zoom} fill="#92400e" />
     </Group>
   );
 }
@@ -816,6 +954,35 @@ function WindowMark({
   );
 }
 
+function TrafficPathRender({ path, ppf, zoom }: { path: TrafficPath; ppf: number; zoom: number }) {
+  const pts = path.points.flatMap((p) => [p.x * ppf, p.y * ppf]);
+  // Determine path length midpoint for label
+  let midX = 0;
+  let midY = 0;
+  if (path.points.length >= 2) {
+    const middleIdx = Math.floor(path.points.length / 2);
+    midX = path.points[middleIdx].x * ppf;
+    midY = path.points[middleIdx].y * ppf;
+  }
+  return (
+    <Group listening={false}>
+      <Line
+        points={pts}
+        stroke="#0ea5e9"
+        strokeWidth={path.minWidthFt * ppf}
+        opacity={0.1}
+        lineCap="round"
+        lineJoin="round"
+      />
+      <Line points={pts} stroke="#0ea5e9" strokeWidth={2 / zoom} dash={[8 / zoom, 4 / zoom]} />
+      <Label x={midX} y={midY}>
+        <Tag fill="rgba(14, 165, 233, 0.95)" cornerRadius={3} />
+        <Text text={`${path.label ?? "Path"} · ${formatFeet(path.minWidthFt)}`} fontSize={10 / zoom} fill="white" padding={3 / zoom} fontStyle="600" />
+      </Label>
+    </Group>
+  );
+}
+
 function NorthArrow({
   zoom,
   pan,
@@ -827,33 +994,28 @@ function NorthArrow({
   stageSize: { width: number; height: number };
   northDeg: number;
 }) {
-  // Position in stage coords (top-right corner). Convert to scene coords because the layer is scaled.
   const margin = 30;
   const sx = (stageSize.width - margin - pan.x) / zoom;
   const sy = (margin - pan.y) / zoom;
-  const size = 20 / zoom;
-  const rad = ((northDeg - 90) * Math.PI) / 180; // -90 because north = up
+  const size = 22 / zoom;
+  const rad = ((northDeg - 90) * Math.PI) / 180;
   const tipX = sx + size * Math.cos(rad);
   const tipY = sy + size * Math.sin(rad);
   return (
     <Group>
-      <Circle x={sx} y={sy} radius={size + 4 / zoom} stroke="#1a1a1a" strokeWidth={1 / zoom} fill="white" opacity={0.85} />
-      <Line points={[sx, sy, tipX, tipY]} stroke="#c2410c" strokeWidth={2 / zoom} />
+      <Circle x={sx} y={sy} radius={size + 5 / zoom} stroke="#1c1917" strokeWidth={1 / zoom} fill="rgba(250,246,238,0.92)" />
+      <Line points={[sx, sy, tipX, tipY]} stroke="#b45309" strokeWidth={2 / zoom} lineCap="round" />
       <Text
         x={tipX - 4 / zoom}
         y={tipY - 14 / zoom}
         text="N"
-        fontSize={12 / zoom}
+        fontSize={11 / zoom}
         fontStyle="700"
-        fill="#1a1a1a"
+        fill="#1c1917"
       />
     </Group>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Grid + clearance
-// ---------------------------------------------------------------------------
 
 function GridLayer({ width, height, ppf }: { width: number; height: number; ppf: number }) {
   const lines = useMemo(() => {
@@ -874,7 +1036,7 @@ function GridLayer({ width, height, ppf }: { width: number; height: number; ppf:
         <Line
           key={i}
           points={l.points}
-          stroke={l.major ? "rgba(0,0,0,0.18)" : "rgba(0,0,0,0.07)"}
+          stroke={l.major ? "rgba(28,25,23,0.18)" : "rgba(28,25,23,0.07)"}
           strokeWidth={l.major ? 1 : 0.5}
         />
       ))}
@@ -882,12 +1044,22 @@ function GridLayer({ width, height, ppf }: { width: number; height: number; ppf:
   );
 }
 
-function ClearanceOverlay({ ppf, zoom, mode }: { ppf: number; zoom: number; mode: "all" | "selected" }) {
+function ClearanceOverlay({
+  ppf,
+  zoom,
+  mode,
+  walls,
+}: {
+  ppf: number;
+  zoom: number;
+  mode: "all" | "selected";
+  walls: Wall[];
+}) {
   const placed = useDesignStore((s) => s.placed);
   const selectedIds = useDesignStore((s) => s.selectedIds);
   const items = useMemo(() => {
-    if (mode === "all") return placed;
-    return placed.filter((p) => selectedIds.includes(p.id));
+    if (mode === "all") return placed.filter((p) => !p.hidden);
+    return placed.filter((p) => selectedIds.includes(p.id) && !p.hidden);
   }, [mode, placed, selectedIds]);
 
   const focus = useMemo(
@@ -898,7 +1070,7 @@ function ClearanceOverlay({ ppf, zoom, mode }: { ppf: number; zoom: number; mode
     [items],
   );
   const all = useMemo(
-    () => placed.map((p) => {
+    () => placed.filter((p) => !p.hidden).map((p) => {
       const cat = getCatalogItem(p.catalogId);
       return { item: p, poly: cat ? footprintPolygon(p, cat) : [], cat };
     }),
@@ -915,17 +1087,18 @@ function ClearanceOverlay({ ppf, zoom, mode }: { ppf: number; zoom: number; mode
         return (
           <Group key={`clr-${item.id}`} x={item.x * ppf} y={item.y * ppf} rotation={item.rotation}>
             {cat.shape === "circle" ? (
-              <Circle radius={w / 2} stroke="#c2410c" strokeWidth={1.25 / zoom} dash={[6 / zoom, 4 / zoom]} />
+              <Circle radius={w / 2} stroke="#b45309" strokeWidth={1.25 / zoom} dash={[6 / zoom, 4 / zoom]} opacity={0.7} />
             ) : (
               <Rect
                 x={-w / 2}
                 y={-d / 2}
                 width={w}
                 height={d}
-                stroke="#c2410c"
+                stroke="#b45309"
                 strokeWidth={1.25 / zoom}
                 dash={[6 / zoom, 4 / zoom]}
                 cornerRadius={6 / zoom}
+                opacity={0.7}
               />
             )}
           </Group>
@@ -941,7 +1114,7 @@ function ClearanceOverlay({ ppf, zoom, mode }: { ppf: number; zoom: number; mode
             if (distFt > 20) return null;
             const midX = ((fItem.x + oItem.x) / 2) * ppf;
             const midY = ((fItem.y + oItem.y) / 2) * ppf;
-            const color = distFt < 2 ? "#b91c1c" : distFt < 3 ? "#b45309" : "#15803d";
+            const color = distFt < 2 ? "#b91c1c" : distFt < 3 ? "#b45309" : "#5d7a5a";
             return (
               <Group key={`d-${fItem.id}-${oItem.id}`}>
                 <Line
@@ -949,22 +1122,47 @@ function ClearanceOverlay({ ppf, zoom, mode }: { ppf: number; zoom: number; mode
                   stroke={color}
                   strokeWidth={1 / zoom}
                   dash={[4 / zoom, 4 / zoom]}
-                  opacity={0.65}
+                  opacity={0.55}
                 />
                 <Label x={midX} y={midY}>
                   <Tag fill="white" stroke={color} strokeWidth={1 / zoom} cornerRadius={3} />
-                  <Text text={formatFeet(distFt)} fontSize={11 / zoom} fill={color} padding={3 / zoom} />
+                  <Text text={formatFeet(distFt)} fontSize={10 / zoom} fill={color} padding={3 / zoom} fontStyle="600" />
                 </Label>
               </Group>
             );
           }),
       )}
+
+      {/* Furniture-to-wall distance for focused items */}
+      {focus.map(({ item, poly }) => {
+        if (!poly.length || !walls.length) return null;
+        // Find closest wall
+        let best: { wall: Wall; foot: Point; from: Point; dist: number } | null = null;
+        for (const w of walls) {
+          for (const corner of poly) {
+            const foot = projectOntoWall(corner, w);
+            const dist = Math.hypot(corner.x - foot.x, corner.y - foot.y);
+            if (!best || dist < best.dist) best = { wall: w, foot, from: corner, dist };
+          }
+        }
+        if (!best || best.dist > 6) return null;
+        const color = best.dist < 1 ? "#b91c1c" : best.dist < 2 ? "#b45309" : "#5d7a5a";
+        return (
+          <Group key={`wall-d-${item.id}`}>
+            <Line
+              points={[best.from.x * ppf, best.from.y * ppf, best.foot.x * ppf, best.foot.y * ppf]}
+              stroke={color}
+              strokeWidth={1 / zoom}
+              dash={[3 / zoom, 3 / zoom]}
+              opacity={0.6}
+            />
+            <Label x={((best.from.x + best.foot.x) / 2) * ppf} y={((best.from.y + best.foot.y) / 2) * ppf}>
+              <Tag fill="white" stroke={color} strokeWidth={1 / zoom} cornerRadius={3} />
+              <Text text={`wall: ${formatFeet(best.dist)}`} fontSize={9 / zoom} fill={color} padding={2 / zoom} fontStyle="600" />
+            </Label>
+          </Group>
+        );
+      })}
     </>
   );
-}
-
-export function exportStageToPng(): string | null {
-  const stage = (window as unknown as { __designStage?: Konva.Stage }).__designStage;
-  void stage;
-  return null;
 }

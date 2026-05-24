@@ -396,6 +396,48 @@ export function getCatalogItem(id: string): CatalogItem | undefined {
   return CATALOG.find((c) => c.id === id);
 }
 
+/** Reasonable default heights in feet for furniture without an explicit `height`. */
+export function defaultHeight(c: CatalogItem): number {
+  if (c.height) return c.height;
+  switch (c.category) {
+    case "seating":
+      return c.id.includes("barstool") ? 3.5 : c.id.includes("chair") ? 2.8 : 2.7;
+    case "tables":
+      return c.id.includes("coffee") ? 1.4 : c.id.includes("side") ? 2 : c.id.includes("desk") ? 2.5 : 2.5;
+    case "beds":
+      return 2;
+    case "storage":
+      return c.id.includes("bookshelf") ? 6 : c.id.includes("tallboy") ? 4.5 : c.id.includes("dresser") ? 3 : c.id.includes("tv-stand") ? 2 : c.id.includes("nightstand") ? 2 : 3;
+    case "rugs":
+      return 0.05;
+    case "lighting":
+      return 5;
+    case "misc":
+      return c.id.includes("plant") ? 4 : 1.5;
+  }
+}
+
+/** Reasonable price estimate (USD) given the catalog item's category. Used for shopping list estimates. */
+export function defaultPrice(c: CatalogItem): [number, number] {
+  if (c.priceRange) return c.priceRange;
+  switch (c.category) {
+    case "seating":
+      return c.id.includes("lshape") ? [1500, 3500] : c.id.includes("sofa") ? [800, 2500] : c.id.includes("chair") ? [200, 800] : [100, 400];
+    case "tables":
+      return c.id.includes("dining") ? [500, 1500] : c.id.includes("desk") ? [300, 1000] : [150, 600];
+    case "beds":
+      return c.id.includes("king") ? [1200, 3000] : [700, 2000];
+    case "storage":
+      return [300, 1500];
+    case "rugs":
+      return [200, 1500];
+    case "lighting":
+      return [100, 500];
+    case "misc":
+      return [50, 400];
+  }
+}
+
 export const CATEGORIES: { id: CatalogItem["category"]; label: string }[] = [
   { id: "seating", label: "Seating" },
   { id: "tables", label: "Tables" },

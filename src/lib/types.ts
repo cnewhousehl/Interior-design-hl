@@ -43,15 +43,18 @@ export type CatalogItem = {
   name: string;
   category: FurnitureCategory;
   shape: FurnitureShape;
-  width: number; // feet (along local X)
-  depth: number; // feet (along local Y)
+  width: number;
+  depth: number;
+  height?: number;
   themes: Theme[];
   color: string;
-  // For l-shape: a notch cut from the top-right corner with these dimensions
   lShape?: { notchWidth: number; notchDepth: number };
-  // Recommended clearance around the piece in feet (for traffic/seating zones)
   recommendedClearance?: number;
   description?: string;
+  retailers?: { name: string; sku?: string; url?: string }[];
+  priceRange?: [number, number];
+  needsOutlet?: boolean;
+  tvViewing?: boolean;
 };
 
 /**
@@ -68,13 +71,16 @@ export type PlacedFurniture = {
   x: number; // feet, scene coords
   y: number; // feet, scene coords
   rotation: number; // degrees
-  // Optional override of catalog dimensions (e.g. user resized their actual couch)
   widthOverride?: number;
   depthOverride?: number;
+  heightOverride?: number;
   status?: FurnitureStatus;
   priceUsd?: number;
+  retailer?: string;
+  productUrl?: string;
   notes?: string;
   colorOverride?: string;
+  hidden?: boolean;
 };
 
 /** A wall segment between two points (in feet, scene coords). */
@@ -105,6 +111,22 @@ export type WindowOpening = {
   label?: string;
 };
 
+/** A traffic path that should remain unblocked. */
+export type TrafficPath = {
+  id: string;
+  points: Point[];
+  minWidthFt: number; // default ~3 feet
+  label?: string;
+};
+
+/** Electrical outlet / light fixture / etc. */
+export type FixtureMarker = {
+  id: string;
+  position: Point;
+  kind: "outlet" | "switch" | "vent" | "fixture";
+  label?: string;
+};
+
 /** A room polygon (auto-built from walls, or drawn). */
 export type Room = {
   id: string;
@@ -131,8 +153,11 @@ export type SavedLayout = {
   windows: WindowOpening[];
   rooms: Room[];
   annotations: Annotation[];
+  trafficPaths: TrafficPath[];
+  fixtures: FixtureMarker[];
   theme: Theme | null;
-  northDeg: number; // compass orientation of "up" in degrees clockwise from north
+  northDeg: number;
+  ceilingHeightFt: number;
 };
 
 export type CalibrationPoints = {
@@ -152,13 +177,17 @@ export type FloorPlan = {
 
 export type ToolMode =
   | "select"
-  | "place" // user has selected a catalog item and is placing it
-  | "calibrate" // user is clicking 2 points on the floor plan to set scale
+  | "place"
+  | "calibrate"
   | "draw-wall"
   | "draw-door"
   | "draw-window"
   | "measure"
-  | "note";
+  | "note"
+  | "traffic"
+  | "outlet";
+
+export type ViewMode = "2d" | "3d";
 
 export type ClearanceMode = "off" | "all" | "selected";
 

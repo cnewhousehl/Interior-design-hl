@@ -41,8 +41,11 @@ export function saveCurrentAs(name: string): SavedLayout {
     windows: s.windows,
     rooms: s.rooms,
     annotations: s.annotations,
+    trafficPaths: s.trafficPaths,
+    fixtures: s.fixtures,
     theme: s.theme,
     northDeg: s.northDeg,
+    ceilingHeightFt: s.ceilingHeightFt,
   };
   const list = listLayouts();
   writeAll([...list, layout]);
@@ -64,8 +67,11 @@ export function overwriteLayout(id: string): SavedLayout | null {
     windows: s.windows,
     rooms: s.rooms,
     annotations: s.annotations,
+    trafficPaths: s.trafficPaths,
+    fixtures: s.fixtures,
     theme: s.theme,
     northDeg: s.northDeg,
+    ceilingHeightFt: s.ceilingHeightFt,
   };
   list[idx] = updated;
   writeAll(list);

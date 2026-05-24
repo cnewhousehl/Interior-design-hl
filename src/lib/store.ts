@@ -6,12 +6,15 @@ import type {
   CalibrationPoints,
   ClearanceMode,
   Door,
+  FixtureMarker,
   FloorPlan,
   PlacedFurniture,
   Room,
   SavedLayout,
   Theme,
   ToolMode,
+  TrafficPath,
+  ViewMode,
   Wall,
   WindowOpening,
 } from "./types";
@@ -24,8 +27,10 @@ type StoreState = {
   windows: WindowOpening[];
   rooms: Room[];
   annotations: Annotation[];
+  trafficPaths: TrafficPath[];
+  fixtures: FixtureMarker[];
   selectedId: string | null;
-  selectedIds: string[]; // for multi-select
+  selectedIds: string[];
   toolMode: ToolMode;
   pendingCatalogId: string | null;
   clearanceMode: ClearanceMode;
@@ -37,8 +42,10 @@ type StoreState = {
   zoom: number;
   pan: { x: number; y: number };
   northDeg: number;
+  ceilingHeightFt: number;
+  view: ViewMode;
+  fitRequest: number;
 
-  // actions
   setFloorPlan: (fp: FloorPlan | null) => void;
   setCalibration: (cal: CalibrationPoints, pixelsPerFoot: number) => void;
 
@@ -53,6 +60,7 @@ type StoreState = {
   setWalls: (walls: Wall[]) => void;
 
   addDoor: (door: Door) => void;
+  updateDoor: (id: string, partial: Partial<Door>) => void;
   removeDoor: (id: string) => void;
   setDoors: (doors: Door[]) => void;
 
@@ -61,6 +69,12 @@ type StoreState = {
 
   addAnnotation: (a: Annotation) => void;
   removeAnnotation: (id: string) => void;
+
+  addTrafficPath: (p: TrafficPath) => void;
+  removeTrafficPath: (id: string) => void;
+
+  addFixture: (f: FixtureMarker) => void;
+  removeFixture: (id: string) => void;
 
   setRooms: (rooms: Room[]) => void;
   updateRoom: (id: string, partial: Partial<Room>) => void;
@@ -79,9 +93,11 @@ type StoreState = {
   setZoom: (zoom: number) => void;
   setPan: (pan: { x: number; y: number }) => void;
   setNorth: (deg: number) => void;
+  setCeilingHeight: (ft: number) => void;
+  setView: (v: ViewMode) => void;
+  fitToView: () => void;
   reset: () => void;
 
-  // bulk import — used by layout load + Claude vision
   importScene: (partial: Partial<SavedLayout>) => void;
 };
 
@@ -93,6 +109,8 @@ const initial = {
   windows: [],
   rooms: [],
   annotations: [],
+  trafficPaths: [],
+  fixtures: [],
   selectedId: null,
   selectedIds: [],
   toolMode: "select" as ToolMode,
@@ -106,6 +124,9 @@ const initial = {
   zoom: 1,
   pan: { x: 0, y: 0 },
   northDeg: 0,
+  ceilingHeightFt: 9,
+  view: "2d" as ViewMode,
+  fitRequest: 0,
 };
 
 const creator: StateCreator<StoreState> = (set, get) => ({
@@ -113,15 +134,8 @@ const creator: StateCreator<StoreState> = (set, get) => ({
 
   setFloorPlan: (fp) =>
     set({
+      ...initial,
       floorPlan: fp,
-      placed: [],
-      walls: [],
-      doors: [],
-      windows: [],
-      rooms: [],
-      annotations: [],
-      selectedId: null,
-      selectedIds: [],
     }),
 
   setCalibration: (cal, ppf) =>
@@ -175,6 +189,8 @@ const creator: StateCreator<StoreState> = (set, get) => ({
   setWalls: (walls) => set({ walls }),
 
   addDoor: (door) => set((s) => ({ doors: [...s.doors, door] })),
+  updateDoor: (id, partial) =>
+    set((s) => ({ doors: s.doors.map((d) => (d.id === id ? { ...d, ...partial } : d)) })),
   removeDoor: (id) => set((s) => ({ doors: s.doors.filter((d) => d.id !== id) })),
   setDoors: (doors) => set({ doors }),
 
@@ -183,6 +199,12 @@ const creator: StateCreator<StoreState> = (set, get) => ({
 
   addAnnotation: (a) => set((s) => ({ annotations: [...s.annotations, a] })),
   removeAnnotation: (id) => set((s) => ({ annotations: s.annotations.filter((x) => x.id !== id) })),
+
+  addTrafficPath: (p) => set((s) => ({ trafficPaths: [...s.trafficPaths, p] })),
+  removeTrafficPath: (id) => set((s) => ({ trafficPaths: s.trafficPaths.filter((p) => p.id !== id) })),
+
+  addFixture: (f) => set((s) => ({ fixtures: [...s.fixtures, f] })),
+  removeFixture: (id) => set((s) => ({ fixtures: s.fixtures.filter((f) => f.id !== id) })),
 
   setRooms: (rooms) => set({ rooms }),
   updateRoom: (id, partial) =>
@@ -207,6 +229,9 @@ const creator: StateCreator<StoreState> = (set, get) => ({
   setZoom: (zoom) => set({ zoom }),
   setPan: (pan) => set({ pan }),
   setNorth: (deg) => set({ northDeg: ((deg % 360) + 360) % 360 }),
+  setCeilingHeight: (ft) => set({ ceilingHeightFt: Math.max(6, Math.min(20, ft)) }),
+  setView: (v) => set({ view: v }),
+  fitToView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
 
   reset: () => set({ ...initial }),
 
@@ -221,11 +246,6 @@ const creator: StateCreator<StoreState> = (set, get) => ({
     })),
 });
 
-/**
- * Wrap the store with `temporal` (zundo) so we get undo/redo.
- * We keep only the user-facing scene fields in history — UI toggles (zoom, pan, tool mode,
- * selection, show* flags) don't push undo entries.
- */
 export const useDesignStore = create<StoreState>()(
   temporal(creator, {
     partialize: (state) => {
@@ -237,10 +257,26 @@ export const useDesignStore = create<StoreState>()(
         windows,
         rooms,
         annotations,
+        trafficPaths,
+        fixtures,
         theme,
         northDeg,
+        ceilingHeightFt,
       } = state;
-      return { floorPlan, placed, walls, doors, windows, rooms, annotations, theme, northDeg } as Partial<StoreState>;
+      return {
+        floorPlan,
+        placed,
+        walls,
+        doors,
+        windows,
+        rooms,
+        annotations,
+        trafficPaths,
+        fixtures,
+        theme,
+        northDeg,
+        ceilingHeightFt,
+      } as Partial<StoreState>;
     },
     limit: 100,
     equality: (a, b) => JSON.stringify(a) === JSON.stringify(b),

@@ -1,15 +1,31 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  RotateCw,
+  Copy,
+  Trash2,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  Eye,
+  EyeOff,
+  Download,
+  Link2,
+  Sparkles,
+  ExternalLink,
+  ListTree,
+} from "lucide-react";
 import { useDesignStore } from "@/lib/store";
-import { getCatalogItem } from "@/lib/catalog";
+import { defaultPrice, getCatalogItem } from "@/lib/catalog";
 import { ALL_THEMES, type FurnitureStatus, type Theme } from "@/lib/types";
 import { formatFeet, formatSqft } from "@/lib/format";
-import { runValidation } from "@/lib/validation";
-import { polygonAreaSqft } from "@/lib/validation";
+import { runValidation, polygonAreaSqft } from "@/lib/validation";
 import { MOODBOARDS } from "@/lib/moodboard";
+import { downloadShoppingCsv, buildShoppingList } from "@/lib/shoppingList";
+import { encodeShareUrl } from "@/lib/share";
 
-type Tab = "props" | "issues" | "mood";
+type Tab = "props" | "issues" | "mood" | "shop";
 
 type Recommendation = {
   catalogId?: string | null;
@@ -25,16 +41,20 @@ export default function PropertiesPanel() {
   const placed = useDesignStore((s) => s.placed);
   const walls = useDesignStore((s) => s.walls);
   const doors = useDesignStore((s) => s.doors);
+  const trafficPaths = useDesignStore((s) => s.trafficPaths);
   const rooms = useDesignStore((s) => s.rooms);
   const theme = useDesignStore((s) => s.theme);
 
-  const issues = useMemo(() => runValidation({ placed, walls, doors }), [placed, walls, doors]);
+  const issues = useMemo(
+    () => runValidation({ placed, walls, doors, trafficPaths }),
+    [placed, walls, doors, trafficPaths],
+  );
 
   const totalSqft = useMemo(
     () =>
       placed.reduce((acc, p) => {
         const c = getCatalogItem(p.catalogId);
-        if (!c) return acc;
+        if (!c || p.hidden) return acc;
         return acc + (p.widthOverride ?? c.width) * (p.depthOverride ?? c.depth);
       }, 0),
     [placed],
@@ -43,24 +63,48 @@ export default function PropertiesPanel() {
   const totalCost = useMemo(() => placed.reduce((acc, p) => acc + (p.priceUsd ?? 0), 0), [placed]);
   const roomSqft = useMemo(() => rooms.reduce((acc, r) => acc + polygonAreaSqft(r.polygon), 0), [rooms]);
 
+  const issueCount = issues.length;
+  const errorCount = issues.filter((i) => i.severity === "error").length;
+
   return (
-    <aside className="w-80 border-l border-ink/10 bg-paper flex flex-col overflow-hidden">
-      <div className="flex border-b border-ink/10 text-sm">
-        <TabBtn id="props" current={tab} onClick={setTab} label="Properties" />
-        <TabBtn id="issues" current={tab} onClick={setTab} label={`Issues${issues.length ? ` (${issues.length})` : ""}`} />
+    <aside className="w-[22rem] border-l border-ink-200/70 bg-paper-50 flex flex-col overflow-hidden">
+      <div className="flex border-b border-ink-200/70 bg-paper-100">
+        <TabBtn id="props" current={tab} onClick={setTab} label="Inspect" />
+        <TabBtn
+          id="issues"
+          current={tab}
+          onClick={setTab}
+          label={`Issues${issueCount ? ` · ${issueCount}` : ""}`}
+          badge={errorCount ? "error" : issueCount ? "warn" : undefined}
+        />
         <TabBtn id="mood" current={tab} onClick={setTab} label="Theme" />
+        <TabBtn id="shop" current={tab} onClick={setTab} label="Shop" />
       </div>
 
-      <div className="px-3 py-2 border-b border-ink/10 text-xs flex justify-between text-ink/70 gap-2">
-        <span>{placed.length} pieces</span>
-        <span>{formatSqft(totalSqft)} footprint</span>
-        {totalCost > 0 && <span>${totalCost.toLocaleString()}</span>}
-        {roomSqft > 0 && <span title="Total room area">· {roomSqft.toFixed(0)} sqft rooms</span>}
+      {/* Summary strip */}
+      <div className="px-4 py-2.5 border-b border-ink-200/70 flex items-center justify-between gap-2 text-[11px] text-ink-500 font-mono tabular-nums bg-paper-100/60">
+        <span>
+          <span className="text-ink-900">{placed.length}</span> pieces
+        </span>
+        <span>
+          <span className="text-ink-900">{formatSqft(totalSqft).replace(" sq ft", "")}</span> sqft
+        </span>
+        {totalCost > 0 && (
+          <span>
+            <span className="text-ink-900">${totalCost.toLocaleString()}</span>
+          </span>
+        )}
+        {roomSqft > 0 && (
+          <span title="Total room area">
+            <span className="text-ink-900">{roomSqft.toFixed(0)}</span> rm
+          </span>
+        )}
       </div>
 
       {tab === "props" && <PropertiesTab />}
       {tab === "issues" && <IssuesTab />}
       {tab === "mood" && <MoodTab theme={theme} />}
+      {tab === "shop" && <ShopTab />}
     </aside>
   );
 }
@@ -70,25 +114,28 @@ function TabBtn({
   current,
   onClick,
   label,
+  badge,
 }: {
   id: Tab;
   current: Tab;
   onClick: (t: Tab) => void;
   label: string;
+  badge?: "error" | "warn";
 }) {
   const active = current === id;
   return (
-    <button
-      onClick={() => onClick(id)}
-      className={`flex-1 px-3 py-2 ${active ? "bg-ink text-paper" : "hover:bg-ink/5 text-ink/70"}`}
-    >
-      {label}
+    <button onClick={() => onClick(id)} className={`tab ${active ? "tab-active" : "tab-idle"} relative`}>
+      <span className="flex items-center justify-center gap-1.5">
+        {label}
+        {badge === "error" && <span className="w-1.5 h-1.5 rounded-full bg-red-600" />}
+        {badge === "warn" && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+      </span>
     </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Properties tab
+// Properties (Inspect) tab
 // ---------------------------------------------------------------------------
 
 function PropertiesTab() {
@@ -103,135 +150,257 @@ function PropertiesTab() {
 
   if (!selected || !cat) {
     return (
-      <div className="p-3 text-sm text-ink/50">
-        Select a piece on the canvas to edit it. Shift-click to add to selection.
+      <div className="flex-1 grid place-items-center p-6 text-center">
+        <div className="max-w-[240px]">
+          <div className="w-12 h-12 rounded-full bg-paper-200 mx-auto mb-3 grid place-items-center">
+            <ListTree className="w-5 h-5 text-ink-400" />
+          </div>
+          <div className="font-medium text-sm text-ink-700 mb-1">Nothing selected</div>
+          <div className="text-xs text-ink-500 leading-snug">
+            Click a piece on the canvas to edit it. Shift-click adds to selection.
+          </div>
+        </div>
       </div>
     );
   }
 
+  const statusOpts: { v: FurnitureStatus | ""; label: string; color: string }[] = [
+    { v: "", label: "—", color: "bg-ink-200" },
+    { v: "considering", label: "Considering", color: "bg-ink-400" },
+    { v: "wishlist", label: "Wishlist", color: "bg-amber-500" },
+    { v: "ordered", label: "Ordered", color: "bg-sky-600" },
+    { v: "owned", label: "Owned", color: "bg-sage-500" },
+  ];
+
   return (
-    <div className="flex-1 overflow-auto p-3 space-y-3 text-sm">
-      <label className="block">
-        <div className="text-xs text-ink/60">Label</div>
-        <input
-          value={selected.label}
-          onChange={(e) => updateFurniture(selected.id, { label: e.target.value })}
-          className="w-full border border-ink/20 rounded px-2 py-1 mt-0.5"
+    <div className="flex-1 overflow-auto p-4 space-y-4 text-sm animate-fade-in">
+      <div className="flex items-start gap-3">
+        <div
+          className="w-9 h-9 rounded-lg shrink-0 ring-1 ring-ink-200"
+          style={{ background: selected.colorOverride ?? cat.color }}
         />
-      </label>
-
-      <div className="grid grid-cols-2 gap-2">
-        <NumberField label="Width (ft)" value={selected.widthOverride ?? cat.width} onChange={(v) => updateFurniture(selected.id, { widthOverride: v })} />
-        <NumberField label="Depth (ft)" value={selected.depthOverride ?? cat.depth} onChange={(v) => updateFurniture(selected.id, { depthOverride: v })} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <NumberField label="X (ft)" value={selected.x} onChange={(v) => updateFurniture(selected.id, { x: v })} />
-        <NumberField label="Y (ft)" value={selected.y} onChange={(v) => updateFurniture(selected.id, { y: v })} />
-      </div>
-
-      <label className="block">
-        <div className="text-xs text-ink/60">Rotation (°)</div>
-        <div className="flex gap-1 mt-0.5">
+        <div className="flex-1 min-w-0">
           <input
-            type="number"
-            value={selected.rotation}
-            onChange={(e) => updateFurniture(selected.id, { rotation: parseFloat(e.target.value) || 0 })}
-            className="flex-1 border border-ink/20 rounded px-2 py-1"
+            value={selected.label}
+            onChange={(e) => updateFurniture(selected.id, { label: e.target.value })}
+            className="input input-sm font-medium"
           />
-          <button
-            onClick={() => updateFurniture(selected.id, { rotation: (selected.rotation + 90) % 360 })}
-            className="px-2 py-1 border border-ink/20 rounded hover:bg-ink/5"
-            title="Rotate 90°"
-          >
-            ↻
-          </button>
+          <div className="text-[11px] text-ink-500 mt-1 truncate">{cat.name}</div>
         </div>
-      </label>
-
-      <label className="block">
-        <div className="text-xs text-ink/60">Status</div>
-        <select
-          value={selected.status ?? ""}
-          onChange={(e) =>
-            updateFurniture(selected.id, { status: (e.target.value || undefined) as FurnitureStatus | undefined })
-          }
-          className="w-full border border-ink/20 rounded px-2 py-1 mt-0.5"
+        <button
+          onClick={() => updateFurniture(selected.id, { hidden: !selected.hidden })}
+          title={selected.hidden ? "Show" : "Hide"}
+          className="btn-ghost btn-icon"
         >
-          <option value="">— none —</option>
-          <option value="considering">Considering</option>
-          <option value="wishlist">Wishlist</option>
-          <option value="ordered">Ordered</option>
-          <option value="owned">Owned</option>
-        </select>
-      </label>
+          {selected.hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+      </div>
 
-      <label className="block">
-        <div className="text-xs text-ink/60">Price (USD)</div>
+      <FieldGroup label="Dimensions (ft)">
+        <div className="grid grid-cols-3 gap-2">
+          <NumberInput
+            label="Width"
+            value={selected.widthOverride ?? cat.width}
+            onChange={(v) => updateFurniture(selected.id, { widthOverride: v })}
+          />
+          <NumberInput
+            label="Depth"
+            value={selected.depthOverride ?? cat.depth}
+            onChange={(v) => updateFurniture(selected.id, { depthOverride: v })}
+          />
+          <NumberInput
+            label="Height"
+            value={selected.heightOverride ?? cat.height ?? 0}
+            onChange={(v) => updateFurniture(selected.id, { heightOverride: v })}
+          />
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Position (ft)">
+        <div className="grid grid-cols-3 gap-2">
+          <NumberInput label="X" value={selected.x} onChange={(v) => updateFurniture(selected.id, { x: v })} />
+          <NumberInput label="Y" value={selected.y} onChange={(v) => updateFurniture(selected.id, { y: v })} />
+          <div>
+            <div className="label">Rotation</div>
+            <div className="flex gap-1 mt-1">
+              <input
+                type="number"
+                value={selected.rotation}
+                onChange={(e) => updateFurniture(selected.id, { rotation: parseFloat(e.target.value) || 0 })}
+                className="input input-sm flex-1"
+              />
+              <button
+                onClick={() => updateFurniture(selected.id, { rotation: (selected.rotation + 90) % 360 })}
+                className="btn-outline btn-sm btn-icon"
+                title="Rotate 90°"
+              >
+                <RotateCw className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Status">
+        <div className="flex gap-1">
+          {statusOpts.map((opt) => {
+            const active = (selected.status ?? "") === opt.v;
+            return (
+              <button
+                key={opt.v}
+                onClick={() =>
+                  updateFurniture(selected.id, { status: opt.v === "" ? undefined : (opt.v as FurnitureStatus) })
+                }
+                className={`flex-1 text-[10px] uppercase tracking-wider py-1 rounded border transition-colors flex items-center justify-center gap-1 ${
+                  active ? "border-ink-900 bg-ink-900 text-paper-50" : "border-ink-200 hover:border-ink-300"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${opt.color}`} />
+                <span className="hidden xl:inline">{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Price & retailer">
+        <div className="grid grid-cols-[1fr_2fr] gap-2">
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">$</span>
+            <input
+              type="number"
+              value={selected.priceUsd ?? ""}
+              onChange={(e) =>
+                updateFurniture(selected.id, {
+                  priceUsd: e.target.value === "" ? undefined : parseFloat(e.target.value),
+                })
+              }
+              placeholder={(() => {
+                const [lo, hi] = defaultPrice(cat);
+                return `${lo}-${hi}`;
+              })()}
+              className="input input-sm pl-5"
+            />
+          </div>
+          <input
+            type="text"
+            value={selected.retailer ?? ""}
+            onChange={(e) => updateFurniture(selected.id, { retailer: e.target.value })}
+            placeholder="e.g. West Elm"
+            className="input input-sm"
+          />
+        </div>
         <input
-          type="number"
-          value={selected.priceUsd ?? ""}
-          onChange={(e) =>
-            updateFurniture(selected.id, {
-              priceUsd: e.target.value === "" ? undefined : parseFloat(e.target.value),
-            })
-          }
-          placeholder="0"
-          className="w-full border border-ink/20 rounded px-2 py-1 mt-0.5"
+          type="url"
+          value={selected.productUrl ?? ""}
+          onChange={(e) => updateFurniture(selected.id, { productUrl: e.target.value })}
+          placeholder="Product URL"
+          className="input input-sm mt-2"
         />
-      </label>
+        {selected.productUrl && (
+          <a
+            href={selected.productUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[11px] text-accent-500 hover:underline mt-1 inline-flex items-center gap-1"
+          >
+            <ExternalLink className="w-3 h-3" /> Open
+          </a>
+        )}
+      </FieldGroup>
 
-      <label className="block">
-        <div className="text-xs text-ink/60">Color</div>
-        <div className="flex gap-1 mt-0.5">
+      <FieldGroup label="Color">
+        <div className="flex items-center gap-2">
           <input
             type="color"
             value={selected.colorOverride ?? cat.color}
             onChange={(e) => updateFurniture(selected.id, { colorOverride: e.target.value })}
-            className="w-10 h-8 border border-ink/20 rounded"
+            className="w-10 h-8 border border-ink-200 rounded-md cursor-pointer"
+          />
+          <input
+            type="text"
+            value={selected.colorOverride ?? cat.color}
+            onChange={(e) => updateFurniture(selected.id, { colorOverride: e.target.value })}
+            className="input input-sm flex-1 font-mono text-xs"
           />
           {selected.colorOverride && (
             <button
               onClick={() => updateFurniture(selected.id, { colorOverride: undefined })}
-              className="px-2 text-xs border border-ink/20 rounded hover:bg-ink/5"
+              className="text-[10px] uppercase text-ink-500 hover:text-ink-900"
             >
               Reset
             </button>
           )}
         </div>
-      </label>
+      </FieldGroup>
 
-      <label className="block">
-        <div className="text-xs text-ink/60">Notes</div>
+      <FieldGroup label="Notes">
         <textarea
           value={selected.notes ?? ""}
           onChange={(e) => updateFurniture(selected.id, { notes: e.target.value })}
           rows={3}
-          placeholder="e.g. West Elm Andes sofa, walnut legs"
-          className="w-full border border-ink/20 rounded px-2 py-1 mt-0.5 resize-y"
+          placeholder="e.g. West Elm Andes, walnut legs, ordered 5/24"
+          className="input resize-y"
         />
-      </label>
+      </FieldGroup>
 
       <div className="flex gap-2 pt-1">
-        <button
-          onClick={() => duplicateFurniture(selected.id)}
-          className="flex-1 px-2 py-1.5 text-sm border border-ink/20 rounded hover:bg-ink/5"
-        >
-          Duplicate
+        <button onClick={() => duplicateFurniture(selected.id)} className="btn-outline btn-md flex-1">
+          <Copy className="w-3.5 h-3.5" /> Duplicate
         </button>
         <button
           onClick={() => removeFurniture(selected.id)}
-          className="flex-1 px-2 py-1.5 text-sm border border-red-700/40 text-red-700 rounded hover:bg-red-700/5"
+          className="btn-md flex-1 border-red-600/30 text-red-700 bg-red-50/50 hover:bg-red-100 rounded-lg border"
         >
-          Delete
+          <Trash2 className="w-3.5 h-3.5" /> Delete
         </button>
       </div>
 
-      <div className="text-xs text-ink/60 pt-1">
-        Catalog: <span className="text-ink">{cat.name}</span>
-        {cat.recommendedClearance ? <> · clearance ≥ {formatFeet(cat.recommendedClearance)}</> : null}
-      </div>
-      {cat.description && <div className="text-xs text-ink/60">{cat.description}</div>}
+      {cat.recommendedClearance ? (
+        <div className="text-[11px] text-ink-500 pt-2 border-t border-ink-200/70">
+          Recommended clearance: {formatFeet(cat.recommendedClearance)}.{" "}
+          {cat.description}
+        </div>
+      ) : (
+        cat.description && (
+          <div className="text-[11px] text-ink-500 pt-2 border-t border-ink-200/70">{cat.description}</div>
+        )
+      )}
+    </div>
+  );
+}
+
+function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="label mb-1.5">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function NumberInput({
+  label,
+  value,
+  onChange,
+}: {
+  label?: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      {label && <div className="label">{label}</div>}
+      <input
+        type="number"
+        step={0.1}
+        value={Number.isFinite(value) ? Number(value.toFixed(3)) : 0}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value);
+          if (!isNaN(v)) onChange(v);
+        }}
+        className="input input-sm mt-1 font-mono tabular-nums"
+      />
     </div>
   );
 }
@@ -244,59 +413,63 @@ function IssuesTab() {
   const placed = useDesignStore((s) => s.placed);
   const walls = useDesignStore((s) => s.walls);
   const doors = useDesignStore((s) => s.doors);
+  const trafficPaths = useDesignStore((s) => s.trafficPaths);
   const setSelected = useDesignStore((s) => s.setSelected);
-  const issues = useMemo(() => runValidation({ placed, walls, doors }), [placed, walls, doors]);
+  const issues = useMemo(
+    () => runValidation({ placed, walls, doors, trafficPaths }),
+    [placed, walls, doors, trafficPaths],
+  );
 
   if (!issues.length) {
     return (
-      <div className="flex-1 p-4 text-sm text-ink/60">
-        <div className="text-green-700 font-medium mb-1">✓ No issues</div>
-        Nothing overlaps, no walls are crossed, all clearances look reasonable.
-        {!walls.length && (
-          <div className="text-xs text-ink/50 mt-3 leading-snug">
-            Tip: draw walls (Walls tool) or use Auto-detect to enable wall-crossing checks.
+      <div className="flex-1 grid place-items-center p-6 text-center animate-fade-in">
+        <div className="max-w-[260px]">
+          <div className="w-12 h-12 rounded-full bg-sage-50 mx-auto mb-3 grid place-items-center">
+            <CheckCircle2 className="w-6 h-6 text-sage-500" strokeWidth={2} />
           </div>
-        )}
+          <div className="font-medium text-sm mb-1 text-sage-600">All clear</div>
+          <div className="text-xs text-ink-500 leading-snug">
+            Nothing overlaps, no walls crossed, all clearances look reasonable.
+            {!walls.length && (
+              <div className="mt-2 text-[10px] uppercase tracking-wider">
+                Draw walls or use Auto-detect to enable wall checks.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-auto p-2 space-y-1.5">
-      {issues.map((i) => (
-        <button
-          key={i.id}
-          onClick={() => i.furnitureId && setSelected(i.furnitureId)}
-          className={`w-full text-left text-sm border rounded p-2 hover:bg-ink/5 ${
-            i.severity === "error"
-              ? "border-red-700/40 bg-red-50/40"
-              : i.severity === "warn"
-                ? "border-amber-700/40 bg-amber-50/40"
-                : "border-ink/20"
-          }`}
-        >
-          <div className="flex items-start gap-2">
-            <span
-              className={`mt-0.5 text-xs rounded px-1.5 py-0.5 ${
-                i.severity === "error"
-                  ? "bg-red-700 text-white"
-                  : i.severity === "warn"
-                    ? "bg-amber-600 text-white"
-                    : "bg-ink/30 text-white"
-              }`}
-            >
-              {i.severity === "error" ? "ERR" : i.severity === "warn" ? "WARN" : "INFO"}
-            </span>
-            <span className="flex-1">{i.message}</span>
-          </div>
-        </button>
-      ))}
+    <div className="flex-1 overflow-auto p-3 space-y-1.5 animate-fade-in">
+      {issues.map((i) => {
+        const Icon = i.severity === "error" ? AlertTriangle : i.severity === "warn" ? AlertTriangle : Info;
+        const colors =
+          i.severity === "error"
+            ? "border-red-200 bg-red-50 hover:bg-red-100"
+            : i.severity === "warn"
+              ? "border-amber-200 bg-amber-50 hover:bg-amber-100"
+              : "border-ink-200 bg-paper-100 hover:bg-paper-200";
+        const iconColor =
+          i.severity === "error" ? "text-red-600" : i.severity === "warn" ? "text-amber-600" : "text-ink-500";
+        return (
+          <button
+            key={i.id}
+            onClick={() => i.furnitureId && setSelected(i.furnitureId)}
+            className={`w-full text-left text-sm border rounded-lg p-2.5 flex items-start gap-2 ${colors}`}
+          >
+            <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${iconColor}`} />
+            <span className="flex-1 leading-snug">{i.message}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Theme / mood board tab
+// Theme / Mood tab
 // ---------------------------------------------------------------------------
 
 function MoodTab({ theme }: { theme: Theme | null }) {
@@ -333,13 +506,13 @@ function MoodTab({ theme }: { theme: Theme | null }) {
   const palette = theme ? MOODBOARDS[theme] : null;
 
   return (
-    <div className="flex-1 overflow-auto p-3 space-y-3 text-sm">
-      <label className="block">
-        <div className="text-xs uppercase tracking-wider text-ink/60 mb-1">Theme</div>
+    <div className="flex-1 overflow-auto p-4 space-y-4 text-sm animate-fade-in">
+      <div>
+        <div className="label mb-1.5">Theme</div>
         <select
           value={theme ?? ""}
           onChange={(e) => setTheme((e.target.value || null) as Theme | null)}
-          className="w-full border border-ink/20 rounded px-2 py-1.5"
+          className="input"
         >
           <option value="">— pick a style —</option>
           {ALL_THEMES.map((t) => (
@@ -348,81 +521,86 @@ function MoodTab({ theme }: { theme: Theme | null }) {
             </option>
           ))}
         </select>
-      </label>
+      </div>
 
       {palette && (
-        <>
-          <div className="text-xs text-ink/70 leading-snug">{palette.notes}</div>
+        <div className="card p-4 space-y-3 animate-slide-up">
+          <div className="text-[11px] text-ink-600 leading-snug italic">{palette.notes}</div>
 
           <div>
-            <div className="text-xs text-ink/60 mb-1">Palette</div>
-            <div className="flex gap-1">
+            <div className="label mb-1.5">Palette</div>
+            <div className="flex gap-1.5">
               {palette.swatches.map((s) => (
                 <div key={s.hex} title={`${s.label} ${s.hex}`} className="flex-1">
-                  <div className="h-10 rounded border border-ink/10" style={{ background: s.hex }} />
-                  <div className="text-[10px] mt-0.5 text-center truncate text-ink/60">{s.label}</div>
+                  <div className="h-12 rounded-md ring-1 ring-ink-200" style={{ background: s.hex }} />
+                  <div className="text-[9px] mt-1 text-center truncate text-ink-500 uppercase tracking-wider">
+                    {s.label}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-ink/60 mb-1">Paint pairings</div>
-            <ul className="space-y-1">
+            <div className="label mb-1.5">Paint pairings</div>
+            <ul className="space-y-1.5">
               {palette.paintIdeas.map((p) => (
                 <li key={p.hex} className="flex items-center gap-2 text-xs">
-                  <span className="w-5 h-5 rounded border border-ink/20" style={{ background: p.hex }} />
-                  <span className="font-medium">{p.name}</span>
-                  <span className="text-ink/50">· {p.brand}</span>
+                  <span className="w-6 h-6 rounded-md ring-1 ring-ink-200" style={{ background: p.hex }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{p.name}</div>
+                    <div className="text-[10px] text-ink-500 uppercase tracking-wider">{p.brand}</div>
+                  </div>
+                  <span className="text-[10px] font-mono text-ink-400">{p.hex.toUpperCase()}</span>
                 </li>
               ))}
             </ul>
           </div>
 
           <div>
-            <div className="text-xs text-ink/60 mb-1">Materials</div>
+            <div className="label mb-1.5">Materials</div>
             <div className="flex flex-wrap gap-1">
               {palette.materials.map((m) => (
-                <span key={m} className="text-[11px] px-1.5 py-0.5 rounded bg-ink/5 border border-ink/10">
+                <span
+                  key={m}
+                  className="text-[11px] px-2 py-0.5 rounded-full bg-paper-200 border border-ink-200/70 text-ink-700"
+                >
                   {m}
                 </span>
               ))}
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {theme && (
-        <button
-          disabled={loading}
-          onClick={fetchRecs}
-          className="w-full px-2 py-1.5 text-sm rounded bg-ink text-paper hover:opacity-90 disabled:opacity-40"
-        >
+        <button onClick={fetchRecs} disabled={loading} className="btn-primary btn-md w-full">
+          <Sparkles className={`w-3.5 h-3.5 ${loading ? "animate-pulse" : ""}`} />
           {loading ? "Thinking…" : recs.length ? "Refresh recommendations" : "Get recommendations"}
         </button>
       )}
       {recsSource && (
-        <div className="text-[10px] text-ink/40">
-          Source: {recsSource === "claude" ? "Claude API" : "Local catalog"}
+        <div className="text-[10px] text-ink-400 uppercase tracking-wider">
+          via {recsSource === "claude" ? "Claude API" : "Local catalog"}
         </div>
       )}
 
       {recs.map((r, i) => {
         const inCatalog = r.catalogId ? getCatalogItem(r.catalogId) : null;
         return (
-          <div key={i} className="border border-ink/15 rounded p-2">
+          <div key={i} className="card p-3 animate-slide-up">
             <div className="flex items-start justify-between gap-2">
               <div className="font-medium text-sm">{r.name}</div>
               {inCatalog && (
                 <button
                   onClick={() => setToolMode("place", inCatalog.id)}
-                  className="text-xs px-2 py-0.5 rounded bg-accent text-white hover:opacity-90 shrink-0"
+                  className="btn-accent btn-sm shrink-0"
                 >
                   Place
                 </button>
               )}
             </div>
-            <div className="text-xs text-ink/60 mt-0.5">
+            <div className="text-[11px] text-ink-500 mt-0.5 font-mono">
               {r.category}
               {r.widthFt && r.depthFt
                 ? ` · ${formatFeet(r.widthFt)} × ${formatFeet(r.depthFt)}`
@@ -430,7 +608,7 @@ function MoodTab({ theme }: { theme: Theme | null }) {
                   ? ` · ${formatFeet(inCatalog.width)} × ${formatFeet(inCatalog.depth)}`
                   : ""}
             </div>
-            <div className="text-xs mt-1 leading-snug">{r.why}</div>
+            <div className="text-xs mt-1.5 leading-snug">{r.why}</div>
           </div>
         );
       })}
@@ -438,30 +616,127 @@ function MoodTab({ theme }: { theme: Theme | null }) {
   );
 }
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  step = 0.1,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  step?: number;
-}) {
+// ---------------------------------------------------------------------------
+// Shopping list tab
+// ---------------------------------------------------------------------------
+
+function ShopTab() {
+  const placed = useDesignStore((s) => s.placed);
+  const setSelected = useDesignStore((s) => s.setSelected);
+  const rows = buildShoppingList();
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const list = map.get(r.status || "unassigned") ?? [];
+      list.push(r);
+      map.set(r.status || "unassigned", list);
+    }
+    return map;
+  }, [rows]);
+
+  const total = rows.reduce((acc, r) => acc + (r.price || (r.priceLow + r.priceHigh) / 2), 0);
+  const knownTotal = rows.reduce((acc, r) => acc + (r.price || 0), 0);
+
+  const shareUrl = () => {
+    const url = encodeShareUrl();
+    navigator.clipboard.writeText(url);
+    alert("Share URL copied to clipboard. The viewer needs to upload the same floor plan separately.");
+  };
+
   return (
-    <label className="block">
-      <div className="text-xs text-ink/60">{label}</div>
-      <input
-        type="number"
-        value={Number.isFinite(value) ? Number(value.toFixed(3)) : 0}
-        step={step}
-        onChange={(e) => {
-          const v = parseFloat(e.target.value);
-          if (!isNaN(v)) onChange(v);
-        }}
-        className="w-full border border-ink/20 rounded px-2 py-1 mt-0.5"
-      />
-    </label>
+    <div className="flex-1 overflow-auto p-4 space-y-3 text-sm animate-fade-in">
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={downloadShoppingCsv} disabled={!rows.length} className="btn-outline btn-md">
+          <Download className="w-3.5 h-3.5" /> Export CSV
+        </button>
+        <button onClick={shareUrl} disabled={!placed.length} className="btn-outline btn-md">
+          <Link2 className="w-3.5 h-3.5" /> Share URL
+        </button>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="card p-3 grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <div className="label">Booked</div>
+            <div className="font-mono text-lg text-ink-900">${knownTotal.toLocaleString()}</div>
+          </div>
+          <div>
+            <div className="label">Est. total</div>
+            <div className="font-mono text-lg text-ink-900">~${total.toLocaleString()}</div>
+          </div>
+        </div>
+      )}
+
+      {(["owned", "ordered", "wishlist", "considering", "unassigned"] as const).map((status) => {
+        const items = grouped.get(status);
+        if (!items?.length) return null;
+        const labels: Record<string, string> = {
+          owned: "Owned",
+          ordered: "Ordered",
+          wishlist: "Wishlist",
+          considering: "Considering",
+          unassigned: "Unassigned",
+        };
+        const dotColor: Record<string, string> = {
+          owned: "bg-sage-500",
+          ordered: "bg-sky-600",
+          wishlist: "bg-amber-500",
+          considering: "bg-ink-400",
+          unassigned: "bg-ink-200",
+        };
+        return (
+          <div key={status} className="card overflow-hidden">
+            <div className="px-3 py-2 bg-paper-100 border-b border-ink-200/70 flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${dotColor[status]}`} />
+              <span className="text-[11px] uppercase tracking-wider font-medium">{labels[status]}</span>
+              <span className="ml-auto text-[10px] font-mono text-ink-500">{items.length}</span>
+            </div>
+            <ul>
+              {items.map((r, i) => {
+                const p = placed.find((x) => x.label === r.label && x.catalogId);
+                return (
+                  <li
+                    key={i}
+                    onClick={() => p && setSelected(p.id)}
+                    className="px-3 py-2 border-t border-ink-200/40 first:border-t-0 hover:bg-ink-100 cursor-pointer flex items-center gap-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{r.label}</div>
+                      <div className="text-[10px] text-ink-500 font-mono truncate">
+                        {r.catalogName} · {formatFeet(r.width)}×{formatFeet(r.depth)}
+                        {r.retailer && ` · ${r.retailer}`}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-mono tabular-nums">
+                        {r.price ? `$${r.price.toLocaleString()}` : (
+                          <span className="text-ink-400">~${Math.round((r.priceLow + r.priceHigh) / 2)}</span>
+                        )}
+                      </div>
+                      {r.url && (
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-[10px] text-accent-500 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" /> link
+                        </a>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+
+      {!rows.length && (
+        <div className="text-xs text-ink-500 text-center py-8">Place furniture to start your shopping list.</div>
+      )}
+    </div>
   );
 }
