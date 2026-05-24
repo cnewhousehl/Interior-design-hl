@@ -81,6 +81,8 @@ export type PlacedFurniture = {
   notes?: string;
   colorOverride?: string;
   hidden?: boolean;
+  locked?: boolean;
+  groupId?: string;
   /** Optional photo of the actual piece, rendered top-down inside the footprint. */
   imageDataUrl?: string;
 };

@@ -10,6 +10,7 @@ import type { CatalogItem, Door, FixtureMarker, PlacedFurniture, Point, Wall, Tr
 import { footprintPolygon, polygonDistance, pxDistance } from "@/lib/geometry";
 import { formatFeet } from "@/lib/format";
 import { computeSunArc } from "@/lib/sunPath";
+import { runValidation } from "@/lib/validation";
 
 type Size = { width: number; height: number };
 
@@ -69,9 +70,27 @@ export default function FloorPlanCanvas() {
   const [measureStart, setMeasureStart] = useState<Point | null>(null);
   const [trafficPoints, setTrafficPoints] = useState<Point[]>([]);
   const [cursor, setCursor] = useState<Point | null>(null);
+  const [lassoStart, setLassoStart] = useState<Point | null>(null);
+  const [lassoEnd, setLassoEnd] = useState<Point | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  const [rotating, setRotating] = useState<{ id: string; startAngle: number; startRot: number } | null>(null);
   const [alignLines, setAlignLines] = useState<{ vertical?: number; horizontal?: number }>({});
 
   const [image] = useImage(floorPlan?.imageDataUrl ?? "", "anonymous");
+
+  // Issue map for inline badges on pieces
+  const issueMap = useMemo(() => {
+    const issues = runValidation({ placed, walls, doors, trafficPaths, fixtures });
+    const map = new Map<string, "error" | "warn">();
+    for (const i of issues) {
+      if (!i.furnitureId) continue;
+      const cur = map.get(i.furnitureId);
+      if (!cur || (cur === "warn" && i.severity === "error")) {
+        map.set(i.furnitureId, i.severity === "info" ? "warn" : i.severity);
+      }
+    }
+    return map;
+  }, [placed, walls, doors, trafficPaths, fixtures]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -106,6 +125,58 @@ export default function FloorPlanCanvas() {
     const scene = eventToScene(e);
     if (!scene) return;
     setCursor(scene.feet);
+    if (lassoStart) setLassoEnd(scene.feet);
+    if (rotating && ppf) {
+      const item = placed.find((p) => p.id === rotating.id);
+      if (!item) return;
+      const angleNow = Math.atan2(scene.feet.y - item.y, scene.feet.x - item.x);
+      let degDelta = ((angleNow - rotating.startAngle) * 180) / Math.PI;
+      let newRot = rotating.startRot + degDelta;
+      const evt = e.evt as MouseEvent;
+      const step = evt.shiftKey ? 15 : 5;
+      newRot = Math.round(newRot / step) * step;
+      updateFurniture(rotating.id, { rotation: ((newRot % 360) + 360) % 360 });
+    }
+  };
+
+  const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    const scene = eventToScene(e);
+    if (!scene) return;
+    const target = e.target;
+    const stage = target.getStage();
+    // Lasso starts only when we're in select mode and the mousedown landed on empty canvas
+    if (toolMode === "select" && (target === stage || target.name() === "floor-image" || target.name() === "room-fill")) {
+      const evt = e.evt as MouseEvent;
+      // Right-button is reserved for context menu, never start lasso
+      if (evt.button === 2) return;
+      setLassoStart(scene.feet);
+      setLassoEnd(scene.feet);
+    }
+  };
+
+  const handleStageMouseUp = () => {
+    if (lassoStart && lassoEnd) {
+      const x0 = Math.min(lassoStart.x, lassoEnd.x);
+      const x1 = Math.max(lassoStart.x, lassoEnd.x);
+      const y0 = Math.min(lassoStart.y, lassoEnd.y);
+      const y1 = Math.max(lassoStart.y, lassoEnd.y);
+      const hit = placed.filter(
+        (p) => !p.hidden && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1,
+      );
+      if (hit.length > 1) {
+        // Apply selection via the store directly
+        useDesignStore.setState({ selectedIds: hit.map((h) => h.id), selectedId: hit[hit.length - 1].id });
+      } else if (hit.length === 1) {
+        setSelected(hit[0].id);
+      }
+    }
+    setLassoStart(null);
+    setLassoEnd(null);
+    if (rotating) setRotating(null);
+  };
+
+  const handleContextMenu = (e: Konva.KonvaEventObject<PointerEvent>) => {
+    e.evt.preventDefault();
   };
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
@@ -337,8 +408,44 @@ export default function FloorPlanCanvas() {
     );
   }
 
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!ppf) return;
+    const catalogId = e.dataTransfer.getData("application/x-catalog-id");
+    if (!catalogId) return;
+    const cat = getCatalogItem(catalogId);
+    if (!cat) return;
+    // Translate the drop client coords into scene feet
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    const imgX = (localX - pan.x) / zoom;
+    const imgY = (localY - pan.y) / zoom;
+    const feet = { x: imgX / ppf, y: imgY / ppf };
+    const snapped = snapToNearestWall(feet, cat, 0, walls);
+    addFurniture({
+      id: crypto.randomUUID(),
+      catalogId: cat.id,
+      label: cat.name,
+      x: snapped.x,
+      y: snapped.y,
+      rotation: snapped.rotation,
+    });
+  };
+
   return (
-    <div ref={containerRef} className="h-full w-full relative bg-paper-200/30">
+    <div
+      ref={containerRef}
+      className="h-full w-full relative bg-paper-200/30"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("application/x-catalog-id")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={handleDrop}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <Stage
         ref={stageRef}
         width={size.width}
@@ -347,12 +454,15 @@ export default function FloorPlanCanvas() {
         scaleY={zoom}
         x={pan.x}
         y={pan.y}
-        draggable={toolMode === "select"}
+        draggable={toolMode === "select" && !lassoStart}
         onDragMove={onDragStage}
         onClick={handleStageClick}
         onTap={handleStageClick}
         onDblClick={handleStageDblClick}
         onMouseMove={handleStageMouseMove}
+        onMouseDown={handleStageMouseDown}
+        onMouseUp={handleStageMouseUp}
+        onContextMenu={handleContextMenu}
         onWheel={handleWheel}
         style={{ cursor: cursorFor(toolMode) }}
       >
@@ -515,11 +625,13 @@ export default function FloorPlanCanvas() {
                 showDimensions={showDimensions}
                 walls={walls}
                 allItems={placed}
+                hasIssue={issueMap.get(item.id)}
                 onAlignLines={setAlignLines}
                 onSelect={(additive) => {
                   if (additive) toggleInSelection(item.id);
                   else setSelected(item.id);
                 }}
+                onContextMenu={(x, y) => setContextMenu({ x, y, itemId: item.id })}
                 onChange={(partial) => updateFurniture(item.id, partial)}
               />
             ))}
@@ -610,6 +722,34 @@ export default function FloorPlanCanvas() {
           </Layer>
         )}
 
+        {/* Lasso marquee */}
+        {ppf && lassoStart && lassoEnd && (
+          <Layer listening={false}>
+            <Rect
+              x={Math.min(lassoStart.x, lassoEnd.x) * ppf}
+              y={Math.min(lassoStart.y, lassoEnd.y) * ppf}
+              width={Math.abs(lassoEnd.x - lassoStart.x) * ppf}
+              height={Math.abs(lassoEnd.y - lassoStart.y) * ppf}
+              fill="rgba(180, 83, 9, 0.08)"
+              stroke="#b45309"
+              strokeWidth={1 / zoom}
+              dash={[5 / zoom, 4 / zoom]}
+            />
+          </Layer>
+        )}
+
+        {/* Rotation handle for selected piece */}
+        {ppf && selectedId && (
+          <Layer>
+            <RotationHandle
+              itemId={selectedId}
+              ppf={ppf}
+              zoom={zoom}
+              onStart={(angle, rot) => setRotating({ id: selectedId, startAngle: angle, startRot: rot })}
+            />
+          </Layer>
+        )}
+
         {ppf && (
           <Layer listening={false}>
             <NorthArrow zoom={zoom} pan={pan} stageSize={size} northDeg={northDeg} />
@@ -644,7 +784,75 @@ export default function FloorPlanCanvas() {
           Click to add points · Double-click to finish · Esc to cancel
         </div>
       )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          itemId={contextMenu.itemId}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function ContextMenu({
+  x,
+  y,
+  itemId,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  itemId: string;
+  onClose: () => void;
+}) {
+  const item = useDesignStore((s) => s.placed.find((p) => p.id === itemId));
+  const updateFurniture = useDesignStore((s) => s.updateFurniture);
+  const removeFurniture = useDesignStore((s) => s.removeFurniture);
+  const duplicateFurniture = useDesignStore((s) => s.duplicateFurniture);
+  const groupSelection = useDesignStore((s) => s.groupSelection);
+  const ungroupSelection = useDesignStore((s) => s.ungroupSelection);
+  const selectedIds = useDesignStore((s) => s.selectedIds);
+
+  if (!item) return null;
+
+  const actions: { label: string; shortcut?: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [
+    { label: "Duplicate", shortcut: "⌘D", onClick: () => duplicateFurniture(item.id) },
+    { label: "Rotate 90°", shortcut: "Dbl-click", onClick: () => updateFurniture(item.id, { rotation: (item.rotation + 90) % 360 }) },
+    { label: item.locked ? "Unlock" : "Lock", onClick: () => updateFurniture(item.id, { locked: !item.locked }) },
+    { label: item.hidden ? "Show" : "Hide", onClick: () => updateFurniture(item.id, { hidden: !item.hidden }) },
+    { label: "Group selection", onClick: () => groupSelection(), disabled: selectedIds.length < 2 },
+    { label: "Ungroup", onClick: () => ungroupSelection(), disabled: !item.groupId },
+    { label: "Delete", shortcut: "Del", onClick: () => removeFurniture(item.id), danger: true },
+  ];
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+      <div
+        className="absolute z-50 card shadow-float py-1 w-44 animate-fade-in"
+        style={{ left: x + 2, top: y + 2 }}
+      >
+        {actions.map((a, i) => (
+          <button
+            key={i}
+            disabled={a.disabled}
+            onClick={() => {
+              a.onClick();
+              onClose();
+            }}
+            className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-ink-100 disabled:opacity-30 disabled:cursor-not-allowed ${
+              a.danger ? "text-red-700 hover:bg-red-50" : ""
+            }`}
+          >
+            <span>{a.label}</span>
+            {a.shortcut && <span className="text-[9px] font-mono text-ink-400">{a.shortcut}</span>}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -781,6 +989,30 @@ function snapToNearestWall(
 // Furniture
 // ---------------------------------------------------------------------------
 
+/**
+ * Move every selected piece by the same delta. If the dragged piece is part
+ * of a group, every piece in the group moves too. Locked pieces are skipped.
+ */
+function applyMoveToSelection(draggedId: string, dx: number, dy: number, rotationOverride?: number) {
+  const state = useDesignStore.getState();
+  const ids = state.selectedIds.includes(draggedId) && state.selectedIds.length > 1
+    ? state.selectedIds
+    : [draggedId];
+  const dragged = state.placed.find((p) => p.id === draggedId);
+  let allIds = ids;
+  if (dragged?.groupId) {
+    const groupMates = state.placed.filter((p) => p.groupId === dragged.groupId).map((p) => p.id);
+    allIds = Array.from(new Set([...ids, ...groupMates]));
+  }
+  for (const id of allIds) {
+    const piece = state.placed.find((p) => p.id === id);
+    if (!piece || piece.locked) continue;
+    const update: Partial<PlacedFurniture> = { x: piece.x + dx, y: piece.y + dy };
+    if (id === draggedId && rotationOverride !== undefined) update.rotation = rotationOverride;
+    state.updateFurniture(id, update);
+  }
+}
+
 function FurnitureShape({
   item,
   catalog,
@@ -790,8 +1022,10 @@ function FurnitureShape({
   showDimensions,
   walls,
   allItems,
+  hasIssue,
   onAlignLines,
   onSelect,
+  onContextMenu,
   onChange,
 }: {
   item: PlacedFurniture;
@@ -802,8 +1036,10 @@ function FurnitureShape({
   showDimensions: boolean;
   walls: Wall[];
   allItems: PlacedFurniture[];
+  hasIssue?: "error" | "warn";
   onAlignLines: (lines: { vertical?: number; horizontal?: number }) => void;
   onSelect: (additive: boolean) => void;
+  onContextMenu: (x: number, y: number) => void;
   onChange: (partial: Partial<PlacedFurniture>) => void;
 }) {
   if (!catalog) return null;
@@ -819,13 +1055,21 @@ function FurnitureShape({
   const strokeWidth = (selected ? 2.5 : 1.25) / zoom;
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (item.locked) return;
     const node = e.target;
     let x = node.x() / ppf;
     let y = node.y() / ppf;
     let alignV: number | undefined;
     let alignH: number | undefined;
+    const myW = item.widthOverride ?? catalog.width;
+    const myD = item.depthOverride ?? catalog.depth;
     for (const other of allItems) {
       if (other.id === item.id || other.hidden) continue;
+      const oCat = getCatalogItem(other.catalogId);
+      if (!oCat) continue;
+      const oW = other.widthOverride ?? oCat.width;
+      const oD = other.depthOverride ?? oCat.depth;
+      // Center alignment
       if (Math.abs(other.x - x) < ALIGN_THRESHOLD_FT) {
         x = other.x;
         alignV = other.x;
@@ -834,6 +1078,23 @@ function FurnitureShape({
         y = other.y;
         alignH = other.y;
       }
+      // Edge-to-edge snap (left edge to left, right edge to right, etc.)
+      const myLeft = x - myW / 2;
+      const myRight = x + myW / 2;
+      const myTop = y - myD / 2;
+      const myBottom = y + myD / 2;
+      const oLeft = other.x - oW / 2;
+      const oRight = other.x + oW / 2;
+      const oTop = other.y - oD / 2;
+      const oBottom = other.y + oD / 2;
+      if (Math.abs(myLeft - oLeft) < ALIGN_THRESHOLD_FT) { x = oLeft + myW / 2; alignV = oLeft; }
+      else if (Math.abs(myRight - oRight) < ALIGN_THRESHOLD_FT) { x = oRight - myW / 2; alignV = oRight; }
+      else if (Math.abs(myLeft - oRight) < ALIGN_THRESHOLD_FT) { x = oRight + myW / 2; alignV = oRight; }
+      else if (Math.abs(myRight - oLeft) < ALIGN_THRESHOLD_FT) { x = oLeft - myW / 2; alignV = oLeft; }
+      if (Math.abs(myTop - oTop) < ALIGN_THRESHOLD_FT) { y = oTop + myD / 2; alignH = oTop; }
+      else if (Math.abs(myBottom - oBottom) < ALIGN_THRESHOLD_FT) { y = oBottom - myD / 2; alignH = oBottom; }
+      else if (Math.abs(myTop - oBottom) < ALIGN_THRESHOLD_FT) { y = oBottom + myD / 2; alignH = oBottom; }
+      else if (Math.abs(myBottom - oTop) < ALIGN_THRESHOLD_FT) { y = oTop - myD / 2; alignH = oTop; }
     }
     node.x(x * ppf);
     node.y(y * ppf);
@@ -841,9 +1102,12 @@ function FurnitureShape({
   };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (item.locked) return;
     const node = e.target;
     let x = node.x() / ppf;
     let y = node.y() / ppf;
+    const dx = x - item.x;
+    const dy = y - item.y;
     // Try wall snap at release time
     if (walls.length && catalog.category !== "rugs") {
       const snap = snapToNearestWall({ x, y }, catalog, item.rotation, walls);
@@ -851,17 +1115,20 @@ function FurnitureShape({
       if (dist < WALL_SNAP_FT) {
         x = snap.x;
         y = snap.y;
-        onChange({ x, y, rotation: snap.rotation });
+        const wallDx = x - item.x;
+        const wallDy = y - item.y;
+        applyMoveToSelection(item.id, wallDx, wallDy, snap.rotation);
         onAlignLines({});
         return;
       }
     }
-    onChange({ x, y });
+    applyMoveToSelection(item.id, dx, dy);
     onAlignLines({});
   };
 
   const handleDblClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     e.cancelBubble = true;
+    if (item.locked) return;
     const step = e.evt.shiftKey ? 5 : 90;
     onChange({ rotation: (item.rotation + step) % 360 });
   };
@@ -871,13 +1138,21 @@ function FurnitureShape({
       x={item.x * ppf}
       y={item.y * ppf}
       rotation={item.rotation}
-      draggable
+      draggable={!item.locked}
       onClick={(e) => {
         e.cancelBubble = true;
         onSelect(e.evt.shiftKey || e.evt.metaKey || e.evt.ctrlKey);
       }}
       onTap={() => onSelect(false)}
       onMouseDown={() => onSelect(false)}
+      onContextMenu={(e) => {
+        e.evt.preventDefault();
+        e.cancelBubble = true;
+        onSelect(false);
+        const stage = e.target.getStage();
+        const ptr = stage?.getPointerPosition();
+        if (ptr) onContextMenu(ptr.x, ptr.y);
+      }}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onDblClick={handleDblClick}
@@ -961,6 +1236,99 @@ function FurnitureShape({
           </Label>
         </Group>
       )}
+
+      {/* Inline issue badge (top-right corner) */}
+      {hasIssue && (
+        <Group x={w / 2 - 6 / zoom} y={-d / 2 + 6 / zoom} listening={false}>
+          <Circle radius={6 / zoom} fill={hasIssue === "error" ? "#dc2626" : "#f59e0b"} stroke="white" strokeWidth={1.5 / zoom} />
+          <Text
+            text="!"
+            x={-3 / zoom}
+            y={-5 / zoom}
+            width={6 / zoom}
+            align="center"
+            fontSize={9 / zoom}
+            fontStyle="700"
+            fill="white"
+          />
+        </Group>
+      )}
+
+      {/* Lock indicator (top-left corner) */}
+      {item.locked && (
+        <Group x={-w / 2 + 6 / zoom} y={-d / 2 + 6 / zoom} listening={false}>
+          <Circle radius={6 / zoom} fill="#1c1917" stroke="white" strokeWidth={1.5 / zoom} />
+          <Text
+            text="🔒"
+            x={-5 / zoom}
+            y={-5 / zoom}
+            width={10 / zoom}
+            align="center"
+            fontSize={8 / zoom}
+          />
+        </Group>
+      )}
+    </Group>
+  );
+}
+
+function RotationHandle({
+  itemId,
+  ppf,
+  zoom,
+  onStart,
+}: {
+  itemId: string;
+  ppf: number;
+  zoom: number;
+  onStart: (startAngle: number, startRot: number) => void;
+}) {
+  const item = useDesignStore((s) => s.placed.find((p) => p.id === itemId));
+  if (!item) return null;
+  const cat = getCatalogItem(item.catalogId);
+  if (!cat) return null;
+  const d = (item.depthOverride ?? cat.depth) * ppf;
+  // Position the handle 18px (scene px) above the piece's local top edge
+  // The handle is a small circle that the user drags to rotate
+  const localOffsetY = -d / 2 - 22 / zoom;
+  const rad = (item.rotation * Math.PI) / 180;
+  const hx = item.x * ppf + Math.sin(rad) * -localOffsetY * -1; // rotate offset vector
+  const hy = item.y * ppf + Math.cos(rad) * localOffsetY;
+  // Simpler approach: render handle in a rotated group
+  return (
+    <Group x={item.x * ppf} y={item.y * ppf} rotation={item.rotation} listening>
+      <Line
+        points={[0, -d / 2, 0, localOffsetY + 5 / zoom]}
+        stroke="#b45309"
+        strokeWidth={1 / zoom}
+        dash={[3 / zoom, 3 / zoom]}
+        listening={false}
+      />
+      <Circle
+        x={0}
+        y={localOffsetY}
+        radius={5 / zoom}
+        fill="#b45309"
+        stroke="white"
+        strokeWidth={1.5 / zoom}
+        onMouseDown={(e) => {
+          e.cancelBubble = true;
+          // Capture starting cursor angle relative to item center, in world coords
+          const stage = e.target.getStage();
+          if (!stage) return;
+          const ptr = stage.getPointerPosition();
+          if (!ptr) return;
+          const pan = useDesignStore.getState().pan;
+          const zm = useDesignStore.getState().zoom;
+          const worldX = (ptr.x - pan.x) / zm / ppf;
+          const worldY = (ptr.y - pan.y) / zm / ppf;
+          const startAngle = Math.atan2(worldY - item.y, worldX - item.x);
+          onStart(startAngle, item.rotation);
+        }}
+      />
+      {/* Suppress unused vars */}
+      {void hx}
+      {void hy}
     </Group>
   );
 }

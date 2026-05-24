@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { useDesignStore } from "@/lib/store";
-import { defaultPrice, getCatalogItem } from "@/lib/catalog";
+import { CATALOG, defaultPrice, getCatalogItem } from "@/lib/catalog";
 import { ALL_THEMES, type FurnitureStatus, type Theme } from "@/lib/types";
 import { formatFeet, formatSqft } from "@/lib/format";
 import { runValidation, polygonAreaSqft, findRoomAt } from "@/lib/validation";
@@ -377,13 +377,34 @@ function PropertiesTab() {
         />
       </FieldGroup>
 
-      <div className="flex gap-2 pt-1">
-        <button onClick={() => duplicateFurniture(selected.id)} className="btn-outline btn-md flex-1">
-          <Copy className="w-3.5 h-3.5" /> Duplicate
+      <FieldGroup label="Replace with catalog item">
+        <select
+          value={selected.catalogId}
+          onChange={(e) => useDesignStore.getState().replaceCatalogId(selected.id, e.target.value)}
+          className="input input-sm"
+        >
+          {CATALOG.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} · {formatFeet(c.width)}×{formatFeet(c.depth)}
+            </option>
+          ))}
+        </select>
+      </FieldGroup>
+
+      <div className="grid grid-cols-3 gap-2 pt-1">
+        <button onClick={() => duplicateFurniture(selected.id)} className="btn-outline btn-md">
+          <Copy className="w-3.5 h-3.5" /> Dup
+        </button>
+        <button
+          onClick={() => updateFurniture(selected.id, { locked: !selected.locked })}
+          className={`btn-md ${selected.locked ? "btn-primary" : "btn-outline"}`}
+          title={selected.locked ? "Unlock" : "Lock — prevent accidental moves"}
+        >
+          {selected.locked ? "Unlock" : "Lock"}
         </button>
         <button
           onClick={() => removeFurniture(selected.id)}
-          className="btn-md flex-1 border-red-600/30 text-red-700 bg-red-50/50 hover:bg-red-100 rounded-lg border"
+          className="btn-md border-red-600/30 text-red-700 bg-red-50/50 hover:bg-red-100 rounded-lg border"
         >
           <Trash2 className="w-3.5 h-3.5" /> Delete
         </button>

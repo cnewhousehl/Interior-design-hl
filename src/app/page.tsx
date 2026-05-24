@@ -63,6 +63,40 @@ export default function Page() {
         return;
       }
 
+      // Cmd+D — duplicate selection
+      if (meta && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const ids = useDesignStore.getState().selectedIds;
+        for (const id of ids) useDesignStore.getState().duplicateFurniture(id);
+        return;
+      }
+
+      // Cmd+G / Cmd+Shift+G — group / ungroup
+      if (meta && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        if (e.shiftKey) useDesignStore.getState().ungroupSelection();
+        else useDesignStore.getState().groupSelection();
+        return;
+      }
+
+      // Cmd+A — select all
+      if (meta && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        const all = useDesignStore.getState().placed.filter((p) => !p.hidden);
+        useDesignStore.setState({ selectedIds: all.map((p) => p.id), selectedId: all[all.length - 1]?.id ?? null });
+        return;
+      }
+
+      // L — lock toggle on selection
+      if (!meta && e.key === "l" && selectedIds.length) {
+        e.preventDefault();
+        for (const id of selectedIds) {
+          const item = useDesignStore.getState().placed.find((p) => p.id === id);
+          if (item) useDesignStore.getState().updateFurniture(id, { locked: !item.locked });
+        }
+        return;
+      }
+
       // Arrow nudge for selection
       const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
       if (ids.length && (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown")) {

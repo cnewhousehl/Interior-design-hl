@@ -60,6 +60,11 @@ type StoreState = {
   updateFurniture: (id: string, partial: Partial<PlacedFurniture>) => void;
   removeFurniture: (id: string) => void;
   duplicateFurniture: (id: string) => void;
+  replaceCatalogId: (id: string, newCatalogId: string) => void;
+  groupSelection: () => void;
+  ungroupSelection: () => void;
+  alignSelection: (axis: "left" | "right" | "top" | "bottom" | "centerX" | "centerY") => void;
+  distributeSelection: (axis: "horizontal" | "vertical") => void;
 
   addWall: (wall: Wall) => void;
   updateWall: (id: string, partial: Partial<Wall>) => void;
@@ -213,8 +218,80 @@ const creator: StateCreator<StoreState> = (set, get) => ({
       label: src.label ? `${src.label} (copy)` : src.label,
       x: src.x + 1,
       y: src.y + 1,
+      groupId: undefined,
+      locked: false,
     };
     set((s) => ({ placed: [...s.placed, copy], selectedId: copy.id, selectedIds: [copy.id] }));
+  },
+
+  replaceCatalogId: (id, newCatalogId) =>
+    set((s) => ({
+      placed: s.placed.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              catalogId: newCatalogId,
+              // Reset overrides since dimensions change
+              widthOverride: undefined,
+              depthOverride: undefined,
+              heightOverride: undefined,
+            }
+          : p,
+      ),
+    })),
+
+  groupSelection: () => {
+    const groupId = crypto.randomUUID();
+    set((s) => ({
+      placed: s.placed.map((p) => (s.selectedIds.includes(p.id) ? { ...p, groupId } : p)),
+    }));
+  },
+
+  ungroupSelection: () =>
+    set((s) => ({
+      placed: s.placed.map((p) => (s.selectedIds.includes(p.id) ? { ...p, groupId: undefined } : p)),
+    })),
+
+  alignSelection: (axis) => {
+    const ids = get().selectedIds;
+    if (ids.length < 2) return;
+    const selected = get().placed.filter((p) => ids.includes(p.id));
+    let target = 0;
+    if (axis === "left") target = Math.min(...selected.map((p) => p.x));
+    else if (axis === "right") target = Math.max(...selected.map((p) => p.x));
+    else if (axis === "top") target = Math.min(...selected.map((p) => p.y));
+    else if (axis === "bottom") target = Math.max(...selected.map((p) => p.y));
+    else if (axis === "centerX") target = selected.reduce((a, p) => a + p.x, 0) / selected.length;
+    else if (axis === "centerY") target = selected.reduce((a, p) => a + p.y, 0) / selected.length;
+    set((s) => ({
+      placed: s.placed.map((p) =>
+        ids.includes(p.id)
+          ? {
+              ...p,
+              ...(axis === "left" || axis === "right" || axis === "centerX" ? { x: target } : {}),
+              ...(axis === "top" || axis === "bottom" || axis === "centerY" ? { y: target } : {}),
+            }
+          : p,
+      ),
+    }));
+  },
+
+  distributeSelection: (axis) => {
+    const ids = get().selectedIds;
+    if (ids.length < 3) return;
+    const sel = get().placed.filter((p) => ids.includes(p.id));
+    const key = axis === "horizontal" ? "x" : "y";
+    const sorted = [...sel].sort((a, b) => a[key] - b[key]);
+    const first = sorted[0][key];
+    const last = sorted[sorted.length - 1][key];
+    const step = (last - first) / (sorted.length - 1);
+    const updates = new Map<string, number>();
+    sorted.forEach((p, i) => updates.set(p.id, first + step * i));
+    set((s) => ({
+      placed: s.placed.map((p) =>
+        updates.has(p.id) ? { ...p, [key]: updates.get(p.id)! } : p,
+      ),
+    }));
   },
 
   addWall: (wall) => set((s) => ({ walls: [...s.walls, wall] })),

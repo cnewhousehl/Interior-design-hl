@@ -143,13 +143,18 @@ export default function FurniturePalette() {
                           <li key={c.id}>
                             <button
                               disabled={!calibrated}
+                              draggable={calibrated}
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("application/x-catalog-id", c.id);
+                                e.dataTransfer.effectAllowed = "copy";
+                              }}
                               onClick={() => setToolMode("place", c.id)}
-                              className={`w-full text-left pl-10 pr-3 py-1.5 text-sm flex items-center gap-2 transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                              className={`w-full text-left pl-10 pr-3 py-1.5 text-sm flex items-center gap-2 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-grab active:cursor-grabbing ${
                                 selected
                                   ? "bg-accent-50 ring-1 ring-inset ring-accent-500/40 text-ink-900"
                                   : "hover:bg-ink-100"
                               }`}
-                              title={c.description}
+                              title={`${c.description ?? c.name} — drag onto canvas or click to enable placement`}
                             >
                               <span
                                 className="inline-block w-3 h-3 rounded-sm shrink-0 ring-1 ring-ink-200"
