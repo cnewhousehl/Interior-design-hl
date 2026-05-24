@@ -161,6 +161,23 @@ export type Annotation =
   | { id: string; type: "measure"; a: Point; b: Point }
   | { id: string; type: "note"; position: Point; text: string };
 
+/** All scene state for one floor — a complete editable layer in a multi-floor project. */
+export type Floor = {
+  id: string;
+  name: string;
+  elevationFt: number; // bottom of this floor above ground level (for 3D stacking)
+  floorPlan: FloorPlan | null;
+  placed: PlacedFurniture[];
+  walls: Wall[];
+  doors: Door[];
+  windows: WindowOpening[];
+  rooms: Room[];
+  annotations: Annotation[];
+  trafficPaths: TrafficPath[];
+  fixtures: FixtureMarker[];
+  ceilingHeightFt: number;
+};
+
 /** A complete saved layout that can be persisted/restored. */
 export type SavedLayout = {
   id: string;

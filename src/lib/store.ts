@@ -8,6 +8,7 @@ import type {
   Door,
   FixtureKind,
   FixtureMarker,
+  Floor,
   FloorPlan,
   LayerVisibility,
   PlacedFurniture,
@@ -50,7 +51,14 @@ type StoreState = {
   pendingFixtureKind: FixtureKind | null;
   showSunPath: boolean;
   showZones: boolean;
+  showAllFloors3D: boolean;
   layers: LayerVisibility;
+  /** Other floors of the project. The "current" floor's data lives in the
+   *  top-level state fields (placed, walls, etc) for editing; this array
+   *  stores the non-current floors. `currentFloorId` is the id of the floor
+   *  whose data is currently active. */
+  floors: Floor[];
+  currentFloorId: string;
 
   setFloorPlan: (fp: FloorPlan | null) => void;
   setCalibration: (cal: CalibrationPoints, pixelsPerFoot: number) => void;
@@ -107,6 +115,13 @@ type StoreState = {
   setPan: (pan: { x: number; y: number }) => void;
   setNorth: (deg: number) => void;
   setCeilingHeight: (ft: number) => void;
+  // Multi-floor
+  addFloor: (name?: string, copyCurrent?: boolean) => void;
+  switchFloor: (id: string) => void;
+  renameFloor: (id: string, name: string) => void;
+  removeFloor: (id: string) => void;
+  setFloorElevation: (id: string, ftFromGround: number) => void;
+  toggleShowAllFloors3D: () => void;
   setView: (v: ViewMode) => void;
   fitToView: () => void;
   setPendingFixtureKind: (k: FixtureKind | null) => void;
@@ -147,6 +162,7 @@ const initial = {
   pendingFixtureKind: null,
   showSunPath: false,
   showZones: true,
+  showAllFloors3D: false,
   layers: {
     furniture: true,
     walls: true,
@@ -158,7 +174,46 @@ const initial = {
     fixtures: true,
     zones: true,
   } as LayerVisibility,
+  floors: [] as Floor[],
+  currentFloorId: "floor-1",
 };
+
+const FIRST_FLOOR_ID = "floor-1";
+void FIRST_FLOOR_ID;
+
+function snapshotFloor(s: StoreState, id: string): Floor {
+  const existing = s.floors.find((f) => f.id === id);
+  return {
+    id,
+    name: existing?.name ?? "Floor 1",
+    elevationFt: existing?.elevationFt ?? 0,
+    floorPlan: s.floorPlan,
+    placed: s.placed,
+    walls: s.walls,
+    doors: s.doors,
+    windows: s.windows,
+    rooms: s.rooms,
+    annotations: s.annotations,
+    trafficPaths: s.trafficPaths,
+    fixtures: s.fixtures,
+    ceilingHeightFt: s.ceilingHeightFt,
+  };
+}
+
+function applyFloor(f: Floor): Partial<StoreState> {
+  return {
+    floorPlan: f.floorPlan,
+    placed: f.placed,
+    walls: f.walls,
+    doors: f.doors,
+    windows: f.windows,
+    rooms: f.rooms,
+    annotations: f.annotations,
+    trafficPaths: f.trafficPaths,
+    fixtures: f.fixtures,
+    ceilingHeightFt: f.ceilingHeightFt,
+  };
+}
 
 const creator: StateCreator<StoreState> = (set, get) => ({
   ...initial,
@@ -343,6 +398,70 @@ const creator: StateCreator<StoreState> = (set, get) => ({
   setPan: (pan) => set({ pan }),
   setNorth: (deg) => set({ northDeg: ((deg % 360) + 360) % 360 }),
   setCeilingHeight: (ft) => set({ ceilingHeightFt: Math.max(6, Math.min(20, ft)) }),
+
+  addFloor: (name, copyCurrent) =>
+    set((s) => {
+      const id = crypto.randomUUID();
+      const snapshot = snapshotFloor(s, s.currentFloorId);
+      const newFloor: Floor = copyCurrent
+        ? { ...snapshot, id, name: name || `Floor ${(s.floors.length + 2)}`, elevationFt: (snapshot.elevationFt ?? 0) + snapshot.ceilingHeightFt }
+        : {
+            id,
+            name: name || `Floor ${s.floors.length + 2}`,
+            elevationFt: (snapshot.elevationFt ?? 0) + snapshot.ceilingHeightFt,
+            floorPlan: null,
+            placed: [],
+            walls: [],
+            doors: [],
+            windows: [],
+            rooms: [],
+            annotations: [],
+            trafficPaths: [],
+            fixtures: [],
+            ceilingHeightFt: 9,
+          };
+      // Stash the current scene as a floor, switch to the new one
+      return {
+        floors: [...s.floors.filter((f) => f.id !== s.currentFloorId), snapshot, newFloor],
+        currentFloorId: id,
+        ...applyFloor(newFloor),
+        selectedId: null,
+        selectedIds: [],
+      };
+    }),
+
+  switchFloor: (id) =>
+    set((s) => {
+      if (id === s.currentFloorId) return {};
+      const target = s.floors.find((f) => f.id === id);
+      if (!target) return {};
+      const snapshot = snapshotFloor(s, s.currentFloorId);
+      return {
+        floors: [...s.floors.filter((f) => f.id !== s.currentFloorId && f.id !== id), snapshot],
+        currentFloorId: id,
+        ...applyFloor(target),
+        selectedId: null,
+        selectedIds: [],
+      };
+    }),
+
+  renameFloor: (id, name) =>
+    set((s) => ({
+      floors: s.floors.map((f) => (f.id === id ? { ...f, name } : f)),
+    })),
+
+  removeFloor: (id) =>
+    set((s) => {
+      if (id === s.currentFloorId) return {};
+      return { floors: s.floors.filter((f) => f.id !== id) };
+    }),
+
+  setFloorElevation: (id, ft) =>
+    set((s) => ({
+      floors: s.floors.map((f) => (f.id === id ? { ...f, elevationFt: ft } : f)),
+    })),
+
+  toggleShowAllFloors3D: () => set((s) => ({ showAllFloors3D: !s.showAllFloors3D })),
   setView: (v) => set({ view: v }),
   fitToView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
   setPendingFixtureKind: (k) => set({ pendingFixtureKind: k }),

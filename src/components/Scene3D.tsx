@@ -39,6 +39,11 @@ export default function Scene3D() {
   const [walkthroughOn, setWalkthroughOn] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const trafficPaths = useDesignStore((s) => s.trafficPaths);
+  const showAllFloors3D = useDesignStore((s) => s.showAllFloors3D);
+  const floors = useDesignStore((s) => s.floors);
+  const currentFloorId = useDesignStore((s) => s.currentFloorId);
+  const currentElevation = floors.find((f) => f.id === currentFloorId)?.elevationFt ?? 0;
+  const allFloors = floors.filter((f) => f.id !== currentFloorId);
 
   // Map preset → time-of-day + atmosphere
   useEffect(() => {
@@ -177,22 +182,28 @@ export default function Scene3D() {
           {/* Default building floor (hardwood) — covers everything inside walls' bounding box */}
           <BuildingFloor bounds={bounds} placedRoomIds={rooms.map((r) => r.id)} />
 
-          {/* Per-room floors */}
-          {rooms.map((r) => (
-            <RoomFloor key={r.id} room={r} />
-          ))}
+          {/* Current floor */}
+          <FloorScene
+            rooms={rooms}
+            walls={walls}
+            placed={placed}
+            ceilingHeightFt={ceilingHeightFt}
+            yOffset={0}
+            opacity={1}
+          />
 
-          {/* Walls */}
-          {walls.map((w) => (
-            <Wall3D key={w.id} wall={w} height={ceilingHeightFt} />
+          {/* Other floors stacked when enabled */}
+          {showAllFloors3D && allFloors.map((f) => (
+            <FloorScene
+              key={f.id}
+              rooms={f.rooms}
+              walls={f.walls}
+              placed={f.placed}
+              ceilingHeightFt={f.ceilingHeightFt}
+              yOffset={f.elevationFt - currentElevation}
+              opacity={f.id === currentFloorId ? 1 : 0.6}
+            />
           ))}
-
-          {/* Furniture */}
-          {placed.filter((p) => !p.hidden).map((p) => {
-            const cat = getCatalogItem(p.catalogId);
-            if (!cat) return null;
-            return <Furniture3D key={p.id} item={p} cat={cat} />;
-          })}
 
           {/* Soft grounded shadow under everything */}
           <ContactShadows
@@ -301,6 +312,38 @@ export default function Scene3D() {
 // Floors
 // ---------------------------------------------------------------------------
 
+function FloorScene({
+  rooms,
+  walls,
+  placed,
+  ceilingHeightFt,
+  yOffset,
+  opacity,
+}: {
+  rooms: { id: string; name: string; polygon: { x: number; y: number }[]; color?: string }[];
+  walls: Wall[];
+  placed: PlacedFurniture[];
+  ceilingHeightFt: number;
+  yOffset: number;
+  opacity: number;
+}) {
+  return (
+    <group position={[0, yOffset, 0]}>
+      {rooms.map((r) => (
+        <RoomFloor key={r.id} room={r} />
+      ))}
+      {walls.map((w) => (
+        <Wall3D key={w.id} wall={w} height={ceilingHeightFt} opacity={opacity} />
+      ))}
+      {placed.filter((p) => !p.hidden).map((p) => {
+        const cat = getCatalogItem(p.catalogId);
+        if (!cat) return null;
+        return <Furniture3D key={p.id} item={p} cat={cat} />;
+      })}
+    </group>
+  );
+}
+
 function BuildingFloor({ bounds, placedRoomIds }: { bounds: { cx: number; cy: number; span: number }; placedRoomIds: string[] }) {
   // Hardwood floor matching the building extent. Per-room floors render on top
   // for kitchens / bathrooms / terraces and physically shadow this layer.
@@ -350,7 +393,7 @@ function RoomFloor({ room }: { room: { id: string; name: string; polygon: { x: n
   );
 }
 
-function Wall3D({ wall, height }: { wall: Wall; height: number }) {
+function Wall3D({ wall, height, opacity = 1 }: { wall: Wall; height: number; opacity?: number }) {
   const thickness = wall.thicknessFt ?? 0.4;
   const dx = wall.b.x - wall.a.x;
   const dy = wall.b.y - wall.a.y;
@@ -361,7 +404,7 @@ function Wall3D({ wall, height }: { wall: Wall; height: number }) {
   return (
     <mesh position={[cx, height / 2, cy]} rotation={[0, -angle, 0]} castShadow receiveShadow>
       <boxGeometry args={[len + thickness, height, thickness]} />
-      <meshStandardMaterial color="#f7f0e1" roughness={0.95} />
+      <meshStandardMaterial color="#f7f0e1" roughness={0.95} transparent={opacity < 1} opacity={opacity} />
     </mesh>
   );
 }

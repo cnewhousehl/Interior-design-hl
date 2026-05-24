@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload,
   MousePointer2,
@@ -30,7 +30,7 @@ import {
 import type { LayerVisibility } from "@/lib/types";
 import { useDesignStore, useTemporalStore } from "@/lib/store";
 import { listLayouts, saveCurrentAs, loadLayout, deleteLayout, overwriteLayout, renameLayout } from "@/lib/persistence";
-import type { SavedLayout, ToolMode, FixtureKind } from "@/lib/types";
+import type { SavedLayout, ToolMode, FixtureKind, Floor } from "@/lib/types";
 import IdentifyFromPhoto from "./IdentifyFromPhoto";
 import { exportPdf } from "@/lib/pdfExport";
 import { getApiKey } from "@/lib/settings";
@@ -111,6 +111,7 @@ export default function Toolbar() {
       <IconBtn icon={<Upload className="w-3.5 h-3.5" />} label="Upload" onClick={() => fileRef.current?.click()} />
 
       <LayoutsMenu />
+      <FloorsMenu />
 
       <CommandSearchButton />
 
@@ -454,6 +455,112 @@ function LayersMenu() {
 // ---------------------------------------------------------------------------
 // Layouts dropdown
 // ---------------------------------------------------------------------------
+
+function FloorsMenu() {
+  const [open, setOpen] = useState(false);
+  const floors = useDesignStore((s) => s.floors);
+  const currentFloorId = useDesignStore((s) => s.currentFloorId);
+  const addFloor = useDesignStore((s) => s.addFloor);
+  const switchFloor = useDesignStore((s) => s.switchFloor);
+  const renameFloor = useDesignStore((s) => s.renameFloor);
+  const removeFloor = useDesignStore((s) => s.removeFloor);
+  const setFloorElevation = useDesignStore((s) => s.setFloorElevation);
+  const showAll = useDesignStore((s) => s.showAllFloors3D);
+  const toggleShowAll = useDesignStore((s) => s.toggleShowAllFloors3D);
+
+  // Effective list — includes the current floor (which lives in the top-level state)
+  const effective = useMemo<Pick<Floor, "id" | "name" | "elevationFt">[]>(() => {
+    const others = floors.filter((f) => f.id !== currentFloorId);
+    const current = floors.find((f) => f.id === currentFloorId);
+    const currentEntry = current ?? { id: currentFloorId, name: "Floor 1", elevationFt: 0 };
+    return [...others, currentEntry].sort((a, b) => (a.elevationFt ?? 0) - (b.elevationFt ?? 0));
+  }, [floors, currentFloorId]);
+
+  const currentName = effective.find((f) => f.id === currentFloorId)?.name ?? "Floor 1";
+
+  return (
+    <div className="relative shrink-0">
+      <button onClick={() => setOpen((o) => !o)} className="btn-outline btn-md" title="Floors">
+        <Square className="w-3.5 h-3.5" />
+        <span className="hidden lg:inline">{currentName}</span>
+        <ChevronDown className="w-3 h-3" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-2 card shadow-float z-20 w-80 p-2 animate-slide-up">
+            <div className="label px-2 py-1">Floors</div>
+            <ul className="max-h-72 overflow-auto mb-1">
+              {effective.map((f) => {
+                const active = f.id === currentFloorId;
+                return (
+                  <li key={f.id} className="group">
+                    <div className={`flex items-center px-2 py-1.5 rounded-md ${active ? "bg-accent-50 ring-1 ring-inset ring-accent-500/30" : "hover:bg-ink-100"}`}>
+                      <button
+                        onClick={() => { switchFloor(f.id); setOpen(false); }}
+                        className="flex-1 text-left text-sm font-medium truncate"
+                      >
+                        {f.name}
+                      </button>
+                      <input
+                        type="number"
+                        step={0.5}
+                        value={f.elevationFt}
+                        onChange={(e) => setFloorElevation(f.id, parseFloat(e.target.value) || 0)}
+                        className="w-14 input input-sm text-right"
+                        title="Elevation above ground (ft) — used for 3D stacking"
+                      />
+                      <span className="text-[10px] font-mono text-ink-400 mx-1">ft</span>
+                      <button
+                        onClick={() => {
+                          const n = prompt("Rename floor:", f.name);
+                          if (n) renameFloor(f.id, n);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-xs text-ink-500 hover:text-ink-900 px-1"
+                        title="Rename"
+                      >
+                        ✎
+                      </button>
+                      {!active && effective.length > 1 && (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Delete ${f.name}?`)) removeFloor(f.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-xs text-red-600 hover:text-red-800 px-1"
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="border-t border-ink-200/70 pt-1">
+              <button
+                onClick={() => { addFloor(undefined, false); setOpen(false); }}
+                className="w-full text-left px-2 py-1.5 text-xs rounded-md hover:bg-ink-100"
+              >
+                <span className="text-accent-500 font-bold mr-1">+</span> Add blank floor
+              </button>
+              <button
+                onClick={() => { addFloor(undefined, true); setOpen(false); }}
+                className="w-full text-left px-2 py-1.5 text-xs rounded-md hover:bg-ink-100"
+              >
+                <span className="text-accent-500 font-bold mr-1">+</span> Duplicate current floor
+              </button>
+              <label className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-ink-100 cursor-pointer">
+                <input type="checkbox" checked={showAll} onChange={toggleShowAll} className="accent-accent-500" />
+                <span>Stack all floors in 3D view</span>
+              </label>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function CommandSearchButton() {
   return (
